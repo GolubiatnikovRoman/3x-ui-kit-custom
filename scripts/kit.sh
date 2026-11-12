@@ -3176,6 +3176,488 @@ menu_auto() {
   return 0
 }
 
+# Настройки отображения подписок; служебные remark inbounds не изменяются.
+sub_names() {
+  local cfg=/etc/kit-sub/config.json action=${1:-show} value=${2:-} current temp
+  [[ -f $cfg ]] || die "Нет kit-sub: персонализация доступна после установки с HTTPS."
+  case $action in
+    show) jq -r '"Название: \(.display_title // "3X-UI KIT")\nИмена подключений: \(.label_mode // "default")"' "$cfg"; return ;;
+    title)
+      [[ -n $value && ${#value} -le 80 && $value != *
+  local c
+  while :; do
+    echo
+    box "3X-UI KIT $KIT_VERSION – управление сервером" "1. Пользователи" "2. Протоколы, порты и маскировка" "3. Проверка сервера" "" \
+      "4. Обновить kit и подписку" "5. Обновить панель 3X-UI" "6. Автообновление: включить или выключить" "" \
+      "7. Резервная копия" "8. Версии" "" "9. Панель 3X-UI (меню x-ui)" "10. Удалить KIT с сервера" "11. Названия подписки и подключений" "0. Выход"
+    echo
+    menu_status
+    update_hint
+    echo
+    ask_num "Выбор [0-11]: "; c=$REPLY
+    case $c in
+      1) menu_users ;;
+      2) menu_net ;;
+      3) menu_check ;;
+      4) run_action cmd_update; pause ;;
+      5) run_action panel_update; pause ;;
+      6) run_action menu_auto; pause ;;
+      7) run_action cmd_backup; pause ;;
+      8) run_action cmd_version; pause ;;
+      9) command -v x-ui >/dev/null && x-ui || echo "Меню x-ui не найдено." ;;
+      10) run_action cmd_uninstall; pause ;;
+      11) run_action menu_sub_names; pause ;;
+      0 | "") return 0 ;;
+      *) echo "Нет такого пункта." ;;
+    esac
+  done
+}
+
+# ---------- полное удаление ----------
+
+# Порты, которые KIT открывал в ufw: подключения и панель из базы панели, подписка из конфига.
+uninstall_ports() {
+  python3 - <<'PY' 2>/dev/null || true
+import json, sqlite3
+out = set()
+try:
+    db = sqlite3.connect("file:/etc/x-ui/x-ui.db?mode=ro", uri=True)
+    out.update(str(r[0]) for r in db.execute("SELECT port FROM inbounds"))
+    out.update(r[0] for r in db.execute("SELECT value FROM settings WHERE key IN ('webPort', 'subPort')"))
+except Exception:
+    pass
+try:
+    out.add(str(json.load(open("/etc/kit-sub/config.json")).get("port", "")))
+except Exception:
+    pass
+print("\n".join(sorted(p for p in out if p.isdigit())))
+PY
+}
+
+cmd_uninstall() { # [--yes] [--no-backup] [--dry-run]
+  local yes=no backup=ask dry=no a
+  for a in "$@"; do
+    case $a in
+      --yes | -y) yes=yes ;;
+      --no-backup) backup=no ;;
+      --dry-run) dry=yes ;;
+      *) die "kit uninstall [--yes] [--no-backup] [--dry-run]" ;;
+    esac
+  done
+  local -a units=(x-ui kit-sub kit-limit.timer kit-limit.service kit-update.timer kit-update.service)
+  local -a paths=(/usr/local/x-ui /etc/x-ui /var/log/x-ui /usr/local/lib/kit-sub /etc/kit-sub /etc/kit /var/www/kit
+    /etc/nginx/kit-stream.conf /etc/nginx/conf.d/kit.conf /etc/cron.d/kit-xui-menu /etc/cron.d/kit-sub-cert /etc/cron.d/kit-nginx-reload
+    /root/cert/ip /root/cert/custom /root/cert/self /root/cert/domain /root/3x-ui.txt /usr/bin/x-ui
+    /etc/fail2ban/jail.d/3x-ipl.conf /etc/fail2ban/jail.d/3x-ipl-backend.conf /etc/fail2ban/filter.d/3x-ipl.conf /etc/fail2ban/action.d/3x-ipl.conf
+    /var/log/3x-ui-install.log /var/log/kit-install-check.log /var/log/kit-domain-cert.log /var/log/kit-update.log)
+  local -a ports=()
+  mapfile -t ports < <(uninstall_ports)
+
+  echo
+  echo "${B}Полное удаление 3X-UI KIT${N}"
+  echo "Будет остановлено и удалено: панель 3X-UI с базой (все пользователи и ключи), подписка, таймеры, настройки nginx от KIT,"
+  echo "сертификаты в /root/cert, логи установки, команда kit. Сделать это обратно нельзя."
+  echo "Останутся: пакеты (nginx, fail2ban, jq и др.), ваш SSH и правила ufw для SSH."
+  [[ $dry == no ]] || echo "${Y}Пробный прогон: ничего не удаляется.${N}"
+  echo
+  if [[ $dry == yes ]]; then
+    printf '  сервисы:   %s\n' "${units[*]}"
+    printf '  каталоги:  %s\n' "${paths[*]}"
+    printf '  ufw:       %s\n' "${ports[*]:-нет}"
+    return 0
+  fi
+
+  if [[ $yes == no ]]; then
+    [[ -t 0 && -t 1 ]] || die "Без терминала нужен флаг --yes."
+    ask_tty "Для подтверждения введите слово «удалить»: " || return 1
+    a=${REPLY//[[:space:]]/}; a=${a,,}
+    [[ $a == "удалить" || $a == "delete" ]] || { echo "Отменено, ничего не тронуто."; return 0; }
+    if [[ $backup == ask ]]; then
+      ask_tty "Сделать резервную копию перед удалением? Она останется в /root. [Y/n] " || REPLY=""
+      [[ ${REPLY,,} == n* || ${REPLY,,} == н* ]] && backup=no || backup=yes
+    fi
+  fi
+  if [[ $backup != no ]]; then
+    (cmd_backup) || die "Копию сделать не удалось, поэтому ничего не удалил. Повторите или запустите с --no-backup."
+  fi
+
+  local u p sshp
+  say "Останавливаю сервисы"
+  for u in "${units[@]}"; do systemctl disable --now "$u" >/dev/null 2>&1 || true; done
+  pkill -f '/usr/local/x-ui/' >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/x-ui.service /etc/systemd/system/kit-*.service /etc/systemd/system/kit-*.timer
+  systemctl daemon-reload >/dev/null 2>&1 || true
+
+  say "Закрываю порты в ufw"
+  sshp=$(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}' | sort -u)
+  if command -v ufw >/dev/null 2>&1; then
+    for p in "${ports[@]}"; do
+      [[ $p == 22 || " $sshp " == *" $p "* ]] && continue
+      ufw delete allow "$p" >/dev/null 2>&1 || true
+      ufw delete allow "$p/tcp" >/dev/null 2>&1 || true
+      ufw delete allow "$p/udp" >/dev/null 2>&1 || true
+    done
+  fi
+
+  say "Убираю nginx от KIT"
+  sed -i '/kit-stream\.conf/d' /etc/nginx/nginx.conf 2>/dev/null || true
+  rm -f /etc/nginx/kit-stream.conf /etc/nginx/conf.d/kit.conf
+  if command -v nginx >/dev/null 2>&1; then
+    if [[ -z $(find /etc/nginx/conf.d -mindepth 1 -name '*.conf' 2>/dev/null) && -z $(find /etc/nginx/sites-enabled -mindepth 1 ! -name default 2>/dev/null) ]]; then
+      systemctl disable --now nginx >/dev/null 2>&1 || true
+    elif nginx -t >/dev/null 2>&1; then
+      systemctl reload nginx >/dev/null 2>&1 || true
+    else
+      warn "nginx не принял конфиг после удаления наших файлов: посмотрите nginx -t."
+    fi
+  fi
+
+  # Порт 80 установщик открывал ради сертификата: если после уборки на нём никто не слушает, закрываем и его.
+  if command -v ufw >/dev/null 2>&1 && [[ " $sshp " != *" 80 "* ]] && ! ss -H -ltn 'sport = :80' 2>/dev/null | grep -q .; then
+    ufw delete allow 80/tcp >/dev/null 2>&1 || true
+    ufw delete allow 80 >/dev/null 2>&1 || true
+  fi
+
+  say "Удаляю файлы и сертификаты"
+  # acme.sh убираем, только если там нет чужих сертификатов.
+  if [[ -x /root/.acme.sh/acme.sh ]]; then
+    if [[ -z $(/root/.acme.sh/acme.sh --list 2>/dev/null | awk 'NR > 1 && $1 !~ /^[0-9.]+$/ {print $1}' | grep -vxF -e "${HOST:-}" -e "${LINK_HOST:-}" | grep . || true) ]]; then
+      /root/.acme.sh/acme.sh --uninstall >/dev/null 2>&1 || true
+      rm -rf /root/.acme.sh
+    else
+      warn "В acme.sh есть другие сертификаты, его оставил."
+    fi
+  fi
+  rm -rf -- /root/x-ui-before-update-* /root/x-ui-before-sni-*
+  for p in "${paths[@]}"; do rm -rf -- "$p"; done
+  # /root/cert мог содержать и чужие сертификаты: убираем только наши подкаталоги, а саму папку – если опустела.
+  rmdir /root/cert 2>/dev/null || true
+  # Правила fail2ban от 3X-UI (3x-ipl): без файлов джейл остался бы загруженным до перезапуска службы.
+  if command -v fail2ban-client >/dev/null 2>&1 && systemctl is-active --quiet fail2ban 2>/dev/null; then
+    fail2ban-client reload >/dev/null 2>&1 || systemctl reload fail2ban >/dev/null 2>&1 || true
+  fi
+
+  echo
+  say "Готово: KIT удалён. Резервные копии (kit-backup-*.tar.gz в /root), если вы их делали, не тронуты: храните как пароль или удалите."
+  echo "Пакеты остались; убрать их: apt purge nginx jq qrencode socat fail2ban. Перезагрузка не нужна."
+  rm -f /usr/local/bin/kit
+}
+
+usage() {
+  cat <<EOF
+${B}3X-UI KIT $KIT_VERSION${N} – команды (то же самое есть в меню: просто ${B}kit${N})
+
+  kit                        меню
+  kit user …                 add, list, link, limit, on, off, del
+  kit links [имя]            все ссылки на подключения (подписка, протоколы, Telegram)
+  kit net …                  протоколы, порты, сайт маскировки, отпечаток
+  kit sub name ИМЯ           название подписки
+  kit sub mode default|prefix   формат названий подключений
+  kit sub show               текущие настройки
+  kit check [--deep|--fix]   проверка сервера
+  kit update [--panel]       обновление (--auto и --manual – автообновление)
+  kit backup                 копия сервера
+  kit uninstall              полное удаление (спросит подтверждение; --dry-run – только показать)
+  kit version                версии
+EOF
+}
+
+# Регистр и «users» вместо «user» не должны ломать команду; имя пользователя (третье слово) не трогаем.
+cmd_key="${1:-} ${2:-}"; cmd_key=${cmd_key,,}; cmd_key=${cmd_key/users /user }
+case "$cmd_key" in
+  " ") if [[ -t 0 && -t 1 ]]; then menu_main; else usage; fi ;;
+  "user add") shift 2; cmd_add "$@"; update_hint ;;
+  "user list") cmd_list; update_hint ;;
+  "user link") shift 2; cmd_link "$@" ;;
+  "links "*) shift; cmd_links "$@" ;;
+  "user limit") shift 2; cmd_limit "$@" ;;
+  "user off") cmd_toggle "${3:-}" false ;;
+  "user on") cmd_toggle "${3:-}" true ;;
+  "user del") shift 2; cmd_del "$@" ;;
+  "user enforce") shift 2; cmd_enforce "$@" ;;
+  "user vision") shift 2; cmd_vision "$@" ;;
+  "sub show") sub_names show ;;
+  "sub name") shift 2; sub_names title "$*" ;;
+  "sub mode") shift 2; sub_names mode "${1:-}" ;;
+  "net ") shift; cmd_net; update_hint ;;
+  "net "*) shift; cmd_net "$@" ;;
+  "sni rotate") shift 2; sni_rotate "$@" ;;
+  "sni "*) [[ -z ${2:-} ]] || die "Команда: kit net site"; sni_show ;;
+  "port set") shift 2; port_set "$@" ;;
+  "port "*) [[ -z ${2:-} ]] || die "Команда: kit net port имя порт"; net_show ;;
+  "reality add") shift 2; reality_add "$@" ;;
+  "panel update") shift 2; panel_update "$@" ;;
+  "__limit-timer on") limit_timer_on ;;
+  "__xver "*) # служебная: xver у всех REALITY со своим доменом (возврат после неудачного --restore)
+    [[ ${2:-} =~ ^[01]$ ]] || exit 1
+    while read -r _id; do
+      inbound_patch "$_id" '.streamSettings |= ((if type == "string" then fromjson else . end) | .realitySettings.xver = $x)' --argjson x "$2" || true
+    done < <(sni_targets | awk -F'\t' '$2 == "self" {print $1}') ;;
+  "__links "*) links_block "${2:-}" "${3:-}" ;;
+  "__subextra "*) # служебная: её зовёт kit update уже новой версией, поэтому заодно догоняем таймер лимита (старый kit его не ставит)
+    limit_timer_enabled || limit_timer_on >/dev/null 2>&1 || true
+    (mt_sync) >/dev/null 2>&1 || true # ссылка MTProto в панели и секреты под нынешний сайт (1.2.1)
+    (grace_cleanup) >/dev/null 2>&1 || true
+    sub_extra_sync ;;
+  "__mtproto "*) mt_sync "${2:-}" ;;
+  "__applinks "*) app_links "${2:-}" ;;
+  "update "*) shift; cmd_update "$@" ;;
+  "backup "*) cmd_backup ;;
+  "uninstall"*) shift; cmd_uninstall "$@" ;;
+  "check "*) shift; cmd_check "$@" ;;
+  "fix "*) shift; cmd_fix "$@" ;;
+  "version "*|"--version "*|"-v "*) cmd_version ;;
+  *) usage; update_hint ;;
+esac
+\n'* && $value != *
+  local c
+  while :; do
+    echo
+    box "3X-UI KIT $KIT_VERSION – управление сервером" "1. Пользователи" "2. Протоколы, порты и маскировка" "3. Проверка сервера" "" \
+      "4. Обновить kit и подписку" "5. Обновить панель 3X-UI" "6. Автообновление: включить или выключить" "" \
+      "7. Резервная копия" "8. Версии" "" "9. Панель 3X-UI (меню x-ui)" "10. Удалить KIT с сервера" "0. Выход"
+    echo
+    menu_status
+    update_hint
+    echo
+    ask_num "Выбор [0-10]: "; c=$REPLY
+    case $c in
+      1) menu_users ;;
+      2) menu_net ;;
+      3) menu_check ;;
+      4) run_action cmd_update; pause ;;
+      5) run_action panel_update; pause ;;
+      6) run_action menu_auto; pause ;;
+      7) run_action cmd_backup; pause ;;
+      8) run_action cmd_version; pause ;;
+      9) command -v x-ui >/dev/null && x-ui || echo "Меню x-ui не найдено." ;;
+      10) run_action cmd_uninstall; pause ;;
+      0 | "") return 0 ;;
+      *) echo "Нет такого пункта." ;;
+    esac
+  done
+}
+
+# ---------- полное удаление ----------
+
+# Порты, которые KIT открывал в ufw: подключения и панель из базы панели, подписка из конфига.
+uninstall_ports() {
+  python3 - <<'PY' 2>/dev/null || true
+import json, sqlite3
+out = set()
+try:
+    db = sqlite3.connect("file:/etc/x-ui/x-ui.db?mode=ro", uri=True)
+    out.update(str(r[0]) for r in db.execute("SELECT port FROM inbounds"))
+    out.update(r[0] for r in db.execute("SELECT value FROM settings WHERE key IN ('webPort', 'subPort')"))
+except Exception:
+    pass
+try:
+    out.add(str(json.load(open("/etc/kit-sub/config.json")).get("port", "")))
+except Exception:
+    pass
+print("\n".join(sorted(p for p in out if p.isdigit())))
+PY
+}
+
+cmd_uninstall() { # [--yes] [--no-backup] [--dry-run]
+  local yes=no backup=ask dry=no a
+  for a in "$@"; do
+    case $a in
+      --yes | -y) yes=yes ;;
+      --no-backup) backup=no ;;
+      --dry-run) dry=yes ;;
+      *) die "kit uninstall [--yes] [--no-backup] [--dry-run]" ;;
+    esac
+  done
+  local -a units=(x-ui kit-sub kit-limit.timer kit-limit.service kit-update.timer kit-update.service)
+  local -a paths=(/usr/local/x-ui /etc/x-ui /var/log/x-ui /usr/local/lib/kit-sub /etc/kit-sub /etc/kit /var/www/kit
+    /etc/nginx/kit-stream.conf /etc/nginx/conf.d/kit.conf /etc/cron.d/kit-xui-menu /etc/cron.d/kit-sub-cert /etc/cron.d/kit-nginx-reload
+    /root/cert/ip /root/cert/custom /root/cert/self /root/cert/domain /root/3x-ui.txt /usr/bin/x-ui
+    /etc/fail2ban/jail.d/3x-ipl.conf /etc/fail2ban/jail.d/3x-ipl-backend.conf /etc/fail2ban/filter.d/3x-ipl.conf /etc/fail2ban/action.d/3x-ipl.conf
+    /var/log/3x-ui-install.log /var/log/kit-install-check.log /var/log/kit-domain-cert.log /var/log/kit-update.log)
+  local -a ports=()
+  mapfile -t ports < <(uninstall_ports)
+
+  echo
+  echo "${B}Полное удаление 3X-UI KIT${N}"
+  echo "Будет остановлено и удалено: панель 3X-UI с базой (все пользователи и ключи), подписка, таймеры, настройки nginx от KIT,"
+  echo "сертификаты в /root/cert, логи установки, команда kit. Сделать это обратно нельзя."
+  echo "Останутся: пакеты (nginx, fail2ban, jq и др.), ваш SSH и правила ufw для SSH."
+  [[ $dry == no ]] || echo "${Y}Пробный прогон: ничего не удаляется.${N}"
+  echo
+  if [[ $dry == yes ]]; then
+    printf '  сервисы:   %s\n' "${units[*]}"
+    printf '  каталоги:  %s\n' "${paths[*]}"
+    printf '  ufw:       %s\n' "${ports[*]:-нет}"
+    return 0
+  fi
+
+  if [[ $yes == no ]]; then
+    [[ -t 0 && -t 1 ]] || die "Без терминала нужен флаг --yes."
+    ask_tty "Для подтверждения введите слово «удалить»: " || return 1
+    a=${REPLY//[[:space:]]/}; a=${a,,}
+    [[ $a == "удалить" || $a == "delete" ]] || { echo "Отменено, ничего не тронуто."; return 0; }
+    if [[ $backup == ask ]]; then
+      ask_tty "Сделать резервную копию перед удалением? Она останется в /root. [Y/n] " || REPLY=""
+      [[ ${REPLY,,} == n* || ${REPLY,,} == н* ]] && backup=no || backup=yes
+    fi
+  fi
+  if [[ $backup != no ]]; then
+    (cmd_backup) || die "Копию сделать не удалось, поэтому ничего не удалил. Повторите или запустите с --no-backup."
+  fi
+
+  local u p sshp
+  say "Останавливаю сервисы"
+  for u in "${units[@]}"; do systemctl disable --now "$u" >/dev/null 2>&1 || true; done
+  pkill -f '/usr/local/x-ui/' >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/x-ui.service /etc/systemd/system/kit-*.service /etc/systemd/system/kit-*.timer
+  systemctl daemon-reload >/dev/null 2>&1 || true
+
+  say "Закрываю порты в ufw"
+  sshp=$(sshd -T 2>/dev/null | awk '$1 == "port" {print $2}' | sort -u)
+  if command -v ufw >/dev/null 2>&1; then
+    for p in "${ports[@]}"; do
+      [[ $p == 22 || " $sshp " == *" $p "* ]] && continue
+      ufw delete allow "$p" >/dev/null 2>&1 || true
+      ufw delete allow "$p/tcp" >/dev/null 2>&1 || true
+      ufw delete allow "$p/udp" >/dev/null 2>&1 || true
+    done
+  fi
+
+  say "Убираю nginx от KIT"
+  sed -i '/kit-stream\.conf/d' /etc/nginx/nginx.conf 2>/dev/null || true
+  rm -f /etc/nginx/kit-stream.conf /etc/nginx/conf.d/kit.conf
+  if command -v nginx >/dev/null 2>&1; then
+    if [[ -z $(find /etc/nginx/conf.d -mindepth 1 -name '*.conf' 2>/dev/null) && -z $(find /etc/nginx/sites-enabled -mindepth 1 ! -name default 2>/dev/null) ]]; then
+      systemctl disable --now nginx >/dev/null 2>&1 || true
+    elif nginx -t >/dev/null 2>&1; then
+      systemctl reload nginx >/dev/null 2>&1 || true
+    else
+      warn "nginx не принял конфиг после удаления наших файлов: посмотрите nginx -t."
+    fi
+  fi
+
+  # Порт 80 установщик открывал ради сертификата: если после уборки на нём никто не слушает, закрываем и его.
+  if command -v ufw >/dev/null 2>&1 && [[ " $sshp " != *" 80 "* ]] && ! ss -H -ltn 'sport = :80' 2>/dev/null | grep -q .; then
+    ufw delete allow 80/tcp >/dev/null 2>&1 || true
+    ufw delete allow 80 >/dev/null 2>&1 || true
+  fi
+
+  say "Удаляю файлы и сертификаты"
+  # acme.sh убираем, только если там нет чужих сертификатов.
+  if [[ -x /root/.acme.sh/acme.sh ]]; then
+    if [[ -z $(/root/.acme.sh/acme.sh --list 2>/dev/null | awk 'NR > 1 && $1 !~ /^[0-9.]+$/ {print $1}' | grep -vxF -e "${HOST:-}" -e "${LINK_HOST:-}" | grep . || true) ]]; then
+      /root/.acme.sh/acme.sh --uninstall >/dev/null 2>&1 || true
+      rm -rf /root/.acme.sh
+    else
+      warn "В acme.sh есть другие сертификаты, его оставил."
+    fi
+  fi
+  rm -rf -- /root/x-ui-before-update-* /root/x-ui-before-sni-*
+  for p in "${paths[@]}"; do rm -rf -- "$p"; done
+  # /root/cert мог содержать и чужие сертификаты: убираем только наши подкаталоги, а саму папку – если опустела.
+  rmdir /root/cert 2>/dev/null || true
+  # Правила fail2ban от 3X-UI (3x-ipl): без файлов джейл остался бы загруженным до перезапуска службы.
+  if command -v fail2ban-client >/dev/null 2>&1 && systemctl is-active --quiet fail2ban 2>/dev/null; then
+    fail2ban-client reload >/dev/null 2>&1 || systemctl reload fail2ban >/dev/null 2>&1 || true
+  fi
+
+  echo
+  say "Готово: KIT удалён. Резервные копии (kit-backup-*.tar.gz в /root), если вы их делали, не тронуты: храните как пароль или удалите."
+  echo "Пакеты остались; убрать их: apt purge nginx jq qrencode socat fail2ban. Перезагрузка не нужна."
+  rm -f /usr/local/bin/kit
+}
+
+usage() {
+  cat <<EOF
+${B}3X-UI KIT $KIT_VERSION${N} – команды (то же самое есть в меню: просто ${B}kit${N})
+
+  kit                        меню
+  kit user …                 add, list, link, limit, on, off, del
+  kit links [имя]            все ссылки на подключения (подписка, протоколы, Telegram)
+  kit net …                  протоколы, порты, сайт маскировки, отпечаток
+  kit check [--deep|--fix]   проверка сервера
+  kit update [--panel]       обновление (--auto и --manual – автообновление)
+  kit backup                 копия сервера
+  kit uninstall              полное удаление (спросит подтверждение; --dry-run – только показать)
+  kit version                версии
+EOF
+}
+
+# Регистр и «users» вместо «user» не должны ломать команду; имя пользователя (третье слово) не трогаем.
+cmd_key="${1:-} ${2:-}"; cmd_key=${cmd_key,,}; cmd_key=${cmd_key/users /user }
+case "$cmd_key" in
+  " ") if [[ -t 0 && -t 1 ]]; then menu_main; else usage; fi ;;
+  "user add") shift 2; cmd_add "$@"; update_hint ;;
+  "user list") cmd_list; update_hint ;;
+  "user link") shift 2; cmd_link "$@" ;;
+  "links "*) shift; cmd_links "$@" ;;
+  "user limit") shift 2; cmd_limit "$@" ;;
+  "user off") cmd_toggle "${3:-}" false ;;
+  "user on") cmd_toggle "${3:-}" true ;;
+  "user del") shift 2; cmd_del "$@" ;;
+  "user enforce") shift 2; cmd_enforce "$@" ;;
+  "user vision") shift 2; cmd_vision "$@" ;;
+  "net ") shift; cmd_net; update_hint ;;
+  "net "*) shift; cmd_net "$@" ;;
+  "sni rotate") shift 2; sni_rotate "$@" ;;
+  "sni "*) [[ -z ${2:-} ]] || die "Команда: kit net site"; sni_show ;;
+  "port set") shift 2; port_set "$@" ;;
+  "port "*) [[ -z ${2:-} ]] || die "Команда: kit net port имя порт"; net_show ;;
+  "reality add") shift 2; reality_add "$@" ;;
+  "panel update") shift 2; panel_update "$@" ;;
+  "__limit-timer on") limit_timer_on ;;
+  "__xver "*) # служебная: xver у всех REALITY со своим доменом (возврат после неудачного --restore)
+    [[ ${2:-} =~ ^[01]$ ]] || exit 1
+    while read -r _id; do
+      inbound_patch "$_id" '.streamSettings |= ((if type == "string" then fromjson else . end) | .realitySettings.xver = $x)' --argjson x "$2" || true
+    done < <(sni_targets | awk -F'\t' '$2 == "self" {print $1}') ;;
+  "__links "*) links_block "${2:-}" "${3:-}" ;;
+  "__subextra "*) # служебная: её зовёт kit update уже новой версией, поэтому заодно догоняем таймер лимита (старый kit его не ставит)
+    limit_timer_enabled || limit_timer_on >/dev/null 2>&1 || true
+    (mt_sync) >/dev/null 2>&1 || true # ссылка MTProto в панели и секреты под нынешний сайт (1.2.1)
+    (grace_cleanup) >/dev/null 2>&1 || true
+    sub_extra_sync ;;
+  "__mtproto "*) mt_sync "${2:-}" ;;
+  "__applinks "*) app_links "${2:-}" ;;
+  "update "*) shift; cmd_update "$@" ;;
+  "backup "*) cmd_backup ;;
+  "uninstall"*) shift; cmd_uninstall "$@" ;;
+  "check "*) shift; cmd_check "$@" ;;
+  "fix "*) shift; cmd_fix "$@" ;;
+  "version "*|"--version "*|"-v "*) cmd_version ;;
+  *) usage; update_hint ;;
+esac
+\r'* ]] || die "Название: 1–80 символов без перевода строки." ;;
+    mode)
+      [[ $value == default || $value == prefix ]] || die "Режим: default или prefix." ;;
+    *) die "kit sub name НАЗВАНИЕ | kit sub mode default|prefix | kit sub show" ;;
+  esac
+  temp=$(mktemp /etc/kit-sub/.config.XXXXXX)
+  chmod 600 "$temp"
+  if [[ $action == title ]]; then
+    jq --arg v "$value" '.display_title = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+    current=$(api POST setting/all '{}')
+    api POST setting/update "$(jq -c --arg v "$value" '.subTitle = $v' <<<"$current")" >/dev/null || { rm -f "$temp"; return 1; }
+    systemctl restart x-ui
+  else
+    jq --arg v "$value" '.label_mode = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+  fi
+  mv -f "$temp" "$cfg"
+  systemctl restart kit-sub
+  say "Настройки подписки сохранены."
+}
+
+menu_sub_names() {
+  sub_names show
+  ask_num "1 – название, 2 – стандартные имена, 3 – Название • inbound, 0 – назад: "
+  case $REPLY in
+    1) ask_tty "Новое название: "; sub_names title "$REPLY" ;;
+    2) sub_names mode default ;;
+    3) sub_names mode prefix ;;
+  esac
+}
+
 menu_main() {
   local c
   while :; do
