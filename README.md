@@ -7,7 +7,7 @@
 [![Версия](https://img.shields.io/github/v/release/itsnotkubrick/3X-UI_KIT?label=3X-UI%20KIT&color=93E06F&labelColor=221B17)](https://github.com/itsnotkubrick/3X-UI_KIT/releases/latest)
 [![Протоколов](https://img.shields.io/badge/протоколов-11-93E06F?labelColor=221B17)](manuals/3x-ui.md#протоколы)
 [![3X-UI](https://img.shields.io/badge/3X--UI-v3.9.0-93E06F?labelColor=221B17)](https://github.com/MHSanaei/3x-ui)
-[![Обновлено](https://img.shields.io/github/last-commit/itsnotkubrick/3X-UI_KIT?label=обновлено&color=93E06F&labelColor=221B17)](https://github.com/itsnotkubrick/3X-UI_KIT/commits)
+[![Обновлено](https://img.shields.io/github/last-commit/GolubiatnikovRoman/3x-ui-kit-custom?label=обновлено&color=93E06F&labelColor=221B17)](https://github.com/GolubiatnikovRoman/3x-ui-kit-custom/commits)
 
 </div>
 
