@@ -44,7 +44,8 @@ class SubscriptionNames(unittest.TestCase):
         plain = "vless://id@host:443#XHTTP-alex\nvless://id@host:443#Other-custom"
         encoded = base64.b64encode(plain.encode())
         out = ks.apply_names(encoded, {"content-type": "text/plain"}, "Дом", "prefix")
-        self.assertIn("Дом • XHTTP", base64.b64decode(out).decode())
+        first_link = base64.b64decode(out).decode().splitlines()[0]
+        self.assertEqual(unquote(urlsplit(first_link).fragment), "Дом • XHTTP")
         self.assertIn("#Other-custom", base64.b64decode(out).decode())
 
     def test_vmess_name_changes_without_changing_server(self):
