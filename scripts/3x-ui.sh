@@ -1786,20 +1786,25 @@ setup_subscription() {
   all=$(api POST setting/all '{}')
   SUB_PATH=$(jq -r '.subPath // "/sub/"' <<<"$all")
   if [[ $SUB_PATH == /sub/ || -z $SUB_PATH ]]; then SUB_PATH="/$(rand_str 12 | tr 'A-Z' 'a-z')/"; fi
+  local preferred_title="3X-UI KIT"
+  if [[ -f /etc/kit-sub/config.json ]]; then
+    preferred_title=$(jq -r '.display_title // "3X-UI KIT"' /etc/kit-sub/config.json 2>/dev/null || echo "3X-UI KIT")
+    [[ -n $preferred_title ]] || preferred_title="3X-UI KIT"
+  fi
   if [[ $TRUSTED == yes ]]; then
     # Наружу смотрит kit-sub (подписка с учётом приложения), 3X-UI – только на 127.0.0.1.
     SUB_PORT=2096; SUB_INTERNAL=2097
     # Без subURI панель показывает ссылку на внутренний порт 2097, до которого снаружи не достучаться.
     local uri="https://$HOST:$SUB_PORT$SUB_PATH"
     [[ $SINGLE == yes ]] && uri="https://$HOST$SUB_PATH"
-    upd=$(jq -c --arg path "$SUB_PATH" --argjson ip "$SUB_INTERNAL" --arg title "3X-UI KIT" --arg uri "$uri" '
+    upd=$(jq -c --arg path "$SUB_PATH" --argjson ip "$SUB_INTERNAL" --arg title "$preferred_title" --arg uri "$uri" '
       .subEnable = true | .subPath = $path | .subTitle = $title | .subListen = "127.0.0.1" | .subPort = $ip
       | .subURI = $uri
       | .subCertFile = "" | .subKeyFile = ""
       | .subClashEnable = true | .subClashAutoDetect = true | .subJsonEnable = true | .subJsonAutoDetect = true' <<<"$all")
   else
     SUB_PORT=$(jq -r '.subPort // 2096' <<<"$all")
-    upd=$(jq -c --arg path "$SUB_PATH" --arg title "3X-UI KIT" '
+    upd=$(jq -c --arg path "$SUB_PATH" --arg title "$preferred_title" '
       .subEnable = true | .subPath = $path | .subTitle = $title
       | .subClashEnable = true | .subClashAutoDetect = true | .subJsonEnable = true | .subJsonAutoDetect = true' <<<"$all")
   fi
