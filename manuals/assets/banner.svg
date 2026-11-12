@@ -20,5 +20,4 @@
 <rect x="854" y="206" width="292" height="52" rx="6" fill="#F2E8D2" stroke="#15110F" stroke-width="3"/>
 <circle cx="868" cy="219" r="3.2" fill="#15110F"/><circle cx="1132" cy="219" r="3.2" fill="#15110F"/>
 <text x="1000" y="241" text-anchor="middle" font-family="Rubik,'Arial Black','Helvetica Neue',Arial,system-ui,sans-serif" font-weight="900" font-size="23" fill="#15110F" letter-spacing=".5">11 ПРОТОКОЛОВ</text></g>
-<text x="1176" y="290" text-anchor="end" font-family="Rubik,'Arial Black','Helvetica Neue',Arial,system-ui,sans-serif" font-size="13" font-weight="500" fill="#CBBFA9" font-style="italic">it's not Kubrick. it's just a VPN.</text>
 </svg>
