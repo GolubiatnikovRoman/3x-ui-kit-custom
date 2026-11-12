@@ -636,8 +636,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(code)
         for k in PASS_HEADERS:
             if k in headers:
-                v = (CONF.get("display_title") if k == "profile-title" and CONF.get("display_title") else
-                     fix_userinfo(headers[k]) if k == "subscription-userinfo" else headers[k])
+                v = fix_userinfo(headers[k]) if k == "subscription-userinfo" else headers[k]
                 if v and "\r" not in v and "\n" not in v:
                     self.send_header(k.title(), v)
         self.send_header("Content-Length", str(len(body)))
