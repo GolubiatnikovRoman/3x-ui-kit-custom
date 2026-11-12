@@ -27,6 +27,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit, urlunsplit, quote, unquote
 
 import yaml
 
@@ -182,6 +183,149 @@ def strip_links(body, grace=None):
     lines = [grace_link(l, grace) for l in text.splitlines() if l.strip() and not l.startswith(("vpn://", "tg://"))]
     out = "\n".join(lines)
     return base64.b64encode(out.encode()).decode().encode() if encoded else out.encode()
+
+
+# Не меняем служебные remark в 3X-UI: только отображаемые имена в подписках.
+# Порядок важен: более длинные имена (REALITY-2, VLESS-WS) проверяем раньше.
+INBOUND_NAMES = tuple(sorted((
+    "REALITY", "REALITY-2", "XHTTP", "Hysteria2", "VLESS-WS", "Trojan-gRPC",
+    "VMess-WS", "Shadowsocks", "TUIC", "WireGuard", "AmneziaWG", "AmneziaWG 3.1",
+    "MTProto"), key=len, reverse=True))
+
+
+def display_label(original, title):
+    """Имя подключений KIT вида «REALITY-user» → «Название • REALITY»."""
+    if not isinstance(original, str) or not title:
+        return original
+    for inbound in INBOUND_NAMES:
+        if original == inbound or original.startswith(inbound + "-"):
+            return f"{title} • {inbound}"
+    return original
+
+
+def rename_links(body, title):
+    """Переписывает только фрагменты известных URL и ps внутри vmess; base64 сохраняем."""
+    text = body.decode("utf-8", "replace").strip()
+    encoded = "://" not in text
+    if encoded:
+        try:
+            text = base64.b64decode(text + "=" * (-len(text) % 4), validate=True).decode("utf-8")
+        except (ValueError, UnicodeError):
+            return body
+    changed = False
+    result = []
+    for line in text.splitlines():
+        if line.startswith("vmess://"):
+            try:
+                payload = line[8:]
+                vm = json.loads(base64.b64decode(payload + "=" * (-len(payload) % 4)))
+                old = vm.get("ps")
+                new = display_label(old, title)
+                if old != new:
+                    vm["ps"] = new
+                    line = "vmess://" + base64.b64encode(json.dumps(vm, ensure_ascii=False).encode()).decode()
+                    changed = True
+            except (ValueError, UnicodeError, TypeError, json.JSONDecodeError):
+                pass
+        elif "://" in line and "#" in line:
+            try:
+                uri = urlsplit(line)
+                old_label = unquote(uri.fragment)
+                new = display_label(old_label, title)
+                if new != old_label:
+                    line = urlunsplit((uri.scheme, uri.netloc, uri.path, uri.query, quote(new, safe="")))
+                    changed = True
+            except ValueError:
+                pass
+        result.append(line)
+    if not changed:
+        return body
+    updated = "\n".join(result).encode()
+    return base64.b64encode(updated) if encoded else updated
+
+
+def rename_yaml(body, title):
+    """Меняем имена прокси и ссылки на них во всех proxy-groups, не нарушая выбор."""
+    cfg = yaml.safe_load(body)
+    if not isinstance(cfg, dict) or not isinstance(cfg.get("proxies"), list):
+        return body
+    mapping = {}
+    for proxy in cfg["proxies"]:
+        if isinstance(proxy, dict) and isinstance(proxy.get("name"), str):
+            old = proxy["name"]
+            new = display_label(old, title)
+            if new != old:
+                mapping[old] = new
+    if not mapping or len(set(mapping.values())) != len(mapping):
+        return body
+    for proxy in cfg["proxies"]:
+        if isinstance(proxy, dict) and proxy.get("name") in mapping:
+            proxy["name"] = mapping[proxy["name"]]
+    for group in cfg.get("proxy-groups", []):
+        if isinstance(group, dict) and isinstance(group.get("proxies"), list):
+            group["proxies"] = [mapping.get(p, p) for p in group["proxies"]]
+    rules = cfg.get("rules")
+    if isinstance(rules, list):
+        for index, rule in enumerate(rules):
+            # Последнее поле правила может быть именем прокси.
+            if isinstance(rule, str) and rule.rsplit(",", 1)[-1] in mapping:
+                rules[index] = rule.rsplit(",", 1)[0] + "," + mapping[rule.rsplit(",", 1)[-1]]
+    return yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False).encode()
+
+
+def rename_json(body, title):
+    """Меняем outbound tags и ссылки маршрутизации на них, сохраняя остальные настройки."""
+    try:
+        obj = json.loads(body)
+    except (ValueError, UnicodeError, RecursionError):
+        return body
+    changed = False
+    for cfg in obj if isinstance(obj, list) else [obj]:
+        if not isinstance(cfg, dict) or not isinstance(cfg.get("outbounds"), list):
+            continue
+        mapping = {}
+        for outbound in cfg["outbounds"]:
+            if isinstance(outbound, dict) and isinstance(outbound.get("tag"), str):
+                old = outbound["tag"]
+                new = display_label(old, title)
+                if new != old:
+                    mapping[old] = new
+        if not mapping or len(set(mapping.values())) != len(mapping):
+            continue
+        for outbound in cfg["outbounds"]:
+            if isinstance(outbound, dict) and outbound.get("tag") in mapping:
+                outbound["tag"] = mapping[outbound["tag"]]
+                changed = True
+        def rewrite(obj):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if key in ("outboundTag", "selector", "fallbackTag") and isinstance(value, str):
+                        obj[key] = mapping.get(value, value)
+                    elif key in ("selector", "outbounds") and isinstance(value, list) and key != "outbounds":
+                        obj[key] = [mapping.get(x, x) if isinstance(x, str) else x for x in value]
+                    elif isinstance(value, (dict, list)):
+                        rewrite(value)
+            elif isinstance(obj, list):
+                for value in obj:
+                    rewrite(value)
+        for section in ("routing", "observatory", "burstObservatory"):
+            if section in cfg:
+                rewrite(cfg[section])
+    return json.dumps(obj, ensure_ascii=False).encode() if changed else body
+
+
+def apply_names(body, headers, title, mode):
+    """По умолчанию возвращает байты без изменений; разрешённые режимы: default, prefix."""
+    if mode != "prefix" or not isinstance(title, str) or not title.strip():
+        return body
+    mime = headers.get("content-type", "").lower()
+    if "yaml" in mime:
+        return rename_yaml(body, title)
+    if "json" in mime or ("text/plain" in mime and body.lstrip()[:1] in (b"{", b"[")):
+        return rename_json(body, title)
+    if "text/plain" in mime:
+        return rename_links(body, title)
+    return body
 
 
 def strip_awg(clash_yaml):
@@ -480,6 +624,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 body = fix_vless_encryption(body, load_grace())
             elif code == 200 and "text/plain" in headers.get("content-type", ""):
                 body = strip_links(body, load_grace())
+            if code == 200:
+                body = apply_names(body, headers, CONF.get("display_title", ""), CONF.get("label_mode", "default"))
             if code == 200 and clash and CONF.get("auto", True):
                 body = add_auto(body)
             if code == 200 and clash and CONF.get("dns", True):

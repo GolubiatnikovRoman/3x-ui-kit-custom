@@ -3176,18 +3176,55 @@ menu_auto() {
   return 0
 }
 
+# Настройки отображения подписок; служебные remark inbounds не изменяются.
+sub_names() {
+  local cfg=/etc/kit-sub/config.json action=${1:-show} value=${2:-} current temp
+  [[ -f $cfg ]] || die "Нет kit-sub: персонализация доступна после установки с HTTPS."
+  case $action in
+    show) jq -r '"Название: \(.display_title // "3X-UI KIT")\nИмена подключений: \(.label_mode // "default")"' "$cfg"; return ;;
+    title)
+      [[ -n $value && ${#value} -le 80 && $value != *$'\n'* && $value != *$'\r'* ]] || die "Название: 1–80 символов без перевода строки." ;;
+    mode)
+      [[ $value == default || $value == prefix ]] || die "Режим: default или prefix." ;;
+    *) die "kit sub name НАЗВАНИЕ | kit sub mode default|prefix | kit sub show" ;;
+  esac
+  temp=$(mktemp /etc/kit-sub/.config.XXXXXX)
+  chmod 600 "$temp"
+  if [[ $action == title ]]; then
+    jq --arg v "$value" '.display_title = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+    current=$(api POST setting/all '{}')
+    api POST setting/update "$(jq -c --arg v "$value" '.subTitle = $v' <<<"$current")" >/dev/null || { rm -f "$temp"; return 1; }
+    systemctl restart x-ui
+  else
+    jq --arg v "$value" '.label_mode = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+  fi
+  mv -f "$temp" "$cfg"
+  systemctl restart kit-sub
+  say "Настройки подписки сохранены."
+}
+
+menu_sub_names() {
+  sub_names show
+  ask_num "1 – название, 2 – стандартные имена, 3 – Название • inbound, 0 – назад: "
+  case $REPLY in
+    1) ask_tty "Новое название: "; sub_names title "$REPLY" ;;
+    2) sub_names mode default ;;
+    3) sub_names mode prefix ;;
+  esac
+}
+
 menu_main() {
   local c
   while :; do
     echo
     box "3X-UI KIT $KIT_VERSION – управление сервером" "1. Пользователи" "2. Протоколы, порты и маскировка" "3. Проверка сервера" "" \
       "4. Обновить kit и подписку" "5. Обновить панель 3X-UI" "6. Автообновление: включить или выключить" "" \
-      "7. Резервная копия" "8. Версии" "" "9. Панель 3X-UI (меню x-ui)" "10. Удалить KIT с сервера" "0. Выход"
+      "7. Резервная копия" "8. Версии" "" "9. Панель 3X-UI (меню x-ui)" "10. Удалить KIT с сервера" "11. Названия подписки и подключений" "0. Выход"
     echo
     menu_status
     update_hint
     echo
-    ask_num "Выбор [0-10]: "; c=$REPLY
+    ask_num "Выбор [0-11]: "; c=$REPLY
     case $c in
       1) menu_users ;;
       2) menu_net ;;
@@ -3199,6 +3236,7 @@ menu_main() {
       8) run_action cmd_version; pause ;;
       9) command -v x-ui >/dev/null && x-ui || echo "Меню x-ui не найдено." ;;
       10) run_action cmd_uninstall; pause ;;
+      11) run_action menu_sub_names; pause ;;
       0 | "") return 0 ;;
       *) echo "Нет такого пункта." ;;
     esac
@@ -3343,6 +3381,9 @@ ${B}3X-UI KIT $KIT_VERSION${N} – команды (то же самое есть
   kit user …                 add, list, link, limit, on, off, del
   kit links [имя]            все ссылки на подключения (подписка, протоколы, Telegram)
   kit net …                  протоколы, порты, сайт маскировки, отпечаток
+  kit sub name ИМЯ           название подписки
+  kit sub mode default|prefix   формат названий подключений
+  kit sub show               текущие настройки
   kit check [--deep|--fix]   проверка сервера
   kit update [--panel]       обновление (--auto и --manual – автообновление)
   kit backup                 копия сервера
@@ -3365,6 +3406,9 @@ case "$cmd_key" in
   "user del") shift 2; cmd_del "$@" ;;
   "user enforce") shift 2; cmd_enforce "$@" ;;
   "user vision") shift 2; cmd_vision "$@" ;;
+  "sub show") sub_names show ;;
+  "sub name") shift 2; sub_names title "$*" ;;
+  "sub mode") shift 2; sub_names mode "${1:-}" ;;
   "net ") shift; cmd_net; update_hint ;;
   "net "*) shift; cmd_net "$@" ;;
   "sni rotate") shift 2; sni_rotate "$@" ;;
