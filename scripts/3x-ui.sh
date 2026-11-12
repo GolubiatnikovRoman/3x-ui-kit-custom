@@ -1808,7 +1808,21 @@ setup_subscription() {
     systemctl restart x-ui
     wait_panel
   fi
+  # Сохраняем персонализацию при повторном запуске установщика.
+  local display_title="3X-UI KIT" label_mode=default cfg=/etc/kit-sub/config.json
+  if [[ -f $cfg ]]; then
+    display_title=$(jq -r '.display_title // "3X-UI KIT"' "$cfg" 2>/dev/null || echo "3X-UI KIT")
+    label_mode=$(jq -r '.label_mode // "default"' "$cfg" 2>/dev/null || echo default)
+  fi
+  [[ -n $display_title ]] || display_title="3X-UI KIT"
+  [[ $label_mode == prefix ]] || label_mode=default
   [[ $TRUSTED == yes ]] && install_kit_sub
+  if [[ $TRUSTED == yes && -f $cfg ]]; then
+    local tmpcfg; tmpcfg=$(mktemp)
+    jq --arg title "$display_title" --arg mode "$label_mode" '.display_title = $title | .label_mode = $mode' "$cfg" >"$tmpcfg"
+    install -m 600 "$tmpcfg" "$cfg"; rm -f "$tmpcfg"
+    systemctl restart kit-sub
+  fi
   if [[ $SINGLE == yes ]]; then SUB_URL="https://$HOST$SUB_PATH$SUBID"
   elif [[ $TRUSTED == yes ]]; then SUB_URL="https://$HOST:$SUB_PORT$SUB_PATH$SUBID"; else SUB_URL="http://127.0.0.1:$SUB_PORT$SUB_PATH$SUBID"; fi
   SUB_FETCH="$(if [[ $TRUSTED == yes ]]; then echo https; else echo http; fi)://$HOST:$SUB_PORT$SUB_PATH$SUBID"
