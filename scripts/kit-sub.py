@@ -228,11 +228,15 @@ def rename_links(body, title):
             except (ValueError, UnicodeError, TypeError, json.JSONDecodeError):
                 pass
         elif "://" in line and "#" in line:
-            uri = urlsplit(line)
-            new = display_label(unquote(uri.fragment), title)
-            if new != unquote(uri.fragment):
-                line = urlunsplit((uri.scheme, uri.netloc, uri.path, uri.query, quote(new, safe="")))
-                changed = True
+            try:
+                uri = urlsplit(line)
+                old_label = unquote(uri.fragment)
+                new = display_label(old_label, title)
+                if new != old_label:
+                    line = urlunsplit((uri.scheme, uri.netloc, uri.path, uri.query, quote(new, safe="")))
+                    changed = True
+            except ValueError:
+                pass
         result.append(line)
     if not changed:
         return body
@@ -260,10 +264,12 @@ def rename_yaml(body, title):
     for group in cfg.get("proxy-groups", []):
         if isinstance(group, dict) and isinstance(group.get("proxies"), list):
             group["proxies"] = [mapping.get(p, p) for p in group["proxies"]]
-    for rule in cfg.get("rules", []):
-        # В Clash последнее поле правила может быть именем прокси.
-        if isinstance(rule, str) and rule.rsplit(",", 1)[-1] in mapping:
-            cfg["rules"][cfg["rules"].index(rule)] = rule.rsplit(",", 1)[0] + "," + mapping[rule.rsplit(",", 1)[-1]]
+    rules = cfg.get("rules")
+    if isinstance(rules, list):
+        for index, rule in enumerate(rules):
+            # Последнее поле правила может быть именем прокси.
+            if isinstance(rule, str) and rule.rsplit(",", 1)[-1] in mapping:
+                rules[index] = rule.rsplit(",", 1)[0] + "," + mapping[rule.rsplit(",", 1)[-1]]
     return yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False).encode()
 
 
