@@ -3183,7 +3183,37 @@ sub_names() {
   case $action in
     show) jq -r '"Название: \(.display_title // "3X-UI KIT")\nИмена подключений: \(.label_mode // "default")"' "$cfg"; return ;;
     title)
-      [[ -n $value && ${#value} -le 80 && $value != *
+      [[ -n $value && ${#value} -le 80 && $value != *$'\n'* && $value != *$'\r'* ]] || die "Название: 1–80 символов без перевода строки." ;;
+    mode)
+      [[ $value == default || $value == prefix ]] || die "Режим: default или prefix." ;;
+    *) die "kit sub name НАЗВАНИЕ | kit sub mode default|prefix | kit sub show" ;;
+  esac
+  temp=$(mktemp /etc/kit-sub/.config.XXXXXX)
+  chmod 600 "$temp"
+  if [[ $action == title ]]; then
+    jq --arg v "$value" '.display_title = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+    current=$(api POST setting/all '{}')
+    api POST setting/update "$(jq -c --arg v "$value" '.subTitle = $v' <<<"$current")" >/dev/null || { rm -f "$temp"; return 1; }
+    systemctl restart x-ui
+  else
+    jq --arg v "$value" '.label_mode = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+  fi
+  mv -f "$temp" "$cfg"
+  systemctl restart kit-sub
+  say "Настройки подписки сохранены."
+}
+
+menu_sub_names() {
+  sub_names show
+  ask_num "1 – название, 2 – стандартные имена, 3 – Название • inbound, 0 – назад: "
+  case $REPLY in
+    1) ask_tty "Новое название: "; sub_names title "$REPLY" ;;
+    2) sub_names mode default ;;
+    3) sub_names mode prefix ;;
+  esac
+}
+
+menu_main() {
   local c
   while :; do
     echo
