@@ -106,3 +106,14 @@ KIT отключены.
 [Hysteria](https://github.com/apernet/hysteria) ·
 [AmneziaWG](https://github.com/amnezia-vpn) ·
 [XKeen](https://github.com/jameszeroX/XKeen)
+
+
+## Подготовка релиза
+
+Выполняй команды в корне репозитория в Bash. На Windows подойдёт Git Bash.
+
+1. `bash tools/release.sh prepare 1.2.3` обновит версию и добавит черновик в `CHANGELOG.md` из коммитов после ближайшего достижимого тега. Для явной базы передай тег или SHA вторым аргументом после версии.
+2. Отредактируй раздел выпуска и закоммить версию, changelog и скрипты.
+3. `bash tools/release.sh sign` сверит закреплённые зависимости и подпишет `SHA256SUMS` локальным ключом. Путь к ключу можно передать аргументом.
+4. `bash tools/release.sh verify` проверит подпись и суммы. Закоммить `SHA256SUMS` и `SHA256SUMS.sig`.
+5. `bash tools/release.sh notes` выведет текст текущего выпуска для GitHub Release. Подготовка тега и публикация выполняются отдельно после проверки выпуска.
