@@ -41,5 +41,21 @@ printf '\nKIT_SIGNERS=(\n  "%s"\n)\n' "$(cat "$temp/test-key.pub")" >> scripts/k
 } > SHA256SUMS
 ssh-keygen -Y sign -f "$temp/test-key" -n 3x-ui-kit-release SHA256SUMS
 bash tools/release.sh verify
+if bash tools/release.sh tag; then exit 1; fi
+! git show-ref --verify --quiet refs/tags/v1.0.1
+
+git add VERSION CHANGELOG.md scripts SHA256SUMS SHA256SUMS.sig
+git commit -qm 'Commit the signed manifest'
 printf '# change\n' >> scripts/kit-sub.py
 if bash tools/release.sh verify; then exit 1; fi
+git add scripts/kit-sub.py
+git commit -qm 'Modify signed file'
+if bash tools/release.sh tag; then exit 1; fi
+! git show-ref --verify --quiet refs/tags/v1.0.1
+git revert --no-edit HEAD >/dev/null
+
+bash tools/release.sh tag
+[[ $(git cat-file -t v1.0.1) == tag ]]
+[[ $(git rev-parse 'v1.0.1^{commit}') == "$(git rev-parse HEAD)" ]]
+[[ $(git for-each-ref --format='%(contents)' refs/tags/v1.0.1) == "$(bash tools/release.sh notes)" ]]
+if bash tools/release.sh tag; then exit 1; fi

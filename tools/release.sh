@@ -25,6 +25,7 @@ usage() {
   tools/release.sh notes [версия]            Вывести описание выпуска из CHANGELOG.md.
   tools/release.sh sign [закрытый-ключ]       Проверить зависимости и подписать SHA256SUMS.
   tools/release.sh verify                    Проверить SHA256SUMS и подпись для текущих файлов.
+  tools/release.sh tag                       Создать локальный аннотированный тег vX.Y.Z на HEAD.
 
 Версия задаётся в формате X.Y.Z (с v или без). База — тег, ветка или коммит.
 По умолчанию используется ближайший достижимый тег vX.Y.Z.
@@ -200,11 +201,29 @@ sign() (
   ok "Манифест подписан. Проверь и закоммить SHA256SUMS и SHA256SUMS.sig."
 )
 
+tag_release() {
+  local head version tag notes
+  head=$(git rev-parse --verify HEAD)
+  version=$(cat VERSION)
+  valid_version "$version" || die "Некорректная версия в VERSION: $version"
+  tag="v$version"
+  if git show-ref --verify --quiet "refs/tags/$tag"; then
+    die "Тег $tag уже существует."
+  fi
+  [[ -z $(git status --porcelain --untracked-files=all -- "${FILES[@]}" CHANGELOG.md SHA256SUMS SHA256SUMS.sig) ]] \
+    || die "Сначала закоммить файлы релиза, CHANGELOG.md, SHA256SUMS и SHA256SUMS.sig."
+  verify
+  notes=$(release_notes "$version")
+  git tag --annotate --file=- --cleanup=verbatim "$tag" "$head" <<<"$notes"
+  ok "Создан локальный тег $tag на $head."
+}
+
 case ${1:-sign} in
   prepare) [[ $# -ge 2 && $# -le 3 ]] || die "Использование: prepare <версия> [база]"; prepare "${@:2}" ;;
   notes) [[ $# -le 2 ]] || die "Использование: notes [версия]"; release_notes "${2:-$(cat VERSION)}" ;;
   sign) [[ $# -le 2 ]] || die "Использование: sign [закрытый-ключ]"; sign "${2:-}" ;;
   verify) [[ $# -eq 1 ]] || die "Использование: verify"; verify ;;
+  tag) [[ $# -eq 1 ]] || die "Использование: tag"; tag_release ;;
   -h | --help) usage ;;
   *)
     [[ $# -eq 1 && ( -f $caller_dir/$1 || -f $1 ) ]] || die "Неизвестная команда: $1. См. --help."
