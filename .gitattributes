@@ -1,0 +1,9 @@
+/VERSION text eol=lf
+/SHA256SUMS text eol=lf
+/SHA256SUMS.sig text eol=lf
+/scripts/3x-ui.sh text eol=lf
+/scripts/hysteria2.sh text eol=lf
+/scripts/kit.sh text eol=lf
+/scripts/kit-sub.py text eol=lf
+/tools/release.sh text eol=lf
+/tools/test/release_test.sh text eol=lf

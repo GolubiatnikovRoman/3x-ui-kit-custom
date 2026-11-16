@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# Подпись релиза 3X-UI KIT. Запускает только автор, на своём компьютере, перед тегом:
-#
-#   tools/release.sh [~/.ssh/3xui_kit_release]
-#
-# Проверяет, что версии сходятся и установщик 3X-UI не подменили, пишет SHA256SUMS,
-# подписывает его закрытым ключом (ssh-keygen спросит пароль ключа) и сразу проверяет
-# подпись открытым ключом, записанным в kit. Сервер 3X-UI KIT ставит обновление, только
-# если эта проверка у него тоже сошлась. Закрытый ключ никуда не отправляется.
+# Подготовка версии, заметок и подписи релиза 3X-UI KIT CUSTOM.
+# Справка: tools/release.sh --help
 
 set -euo pipefail
+caller_dir=$PWD
 cd "$(dirname "$0")/.."
 
 die() { printf '✗  %s\n' "$*" >&2; exit 1; }
@@ -18,78 +13,227 @@ sha() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 
 # (раньше скрипт молча останавливался на случайном месте).
 get() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 "$1" || { echo "✗  Не скачалось с GitHub: $1 (сеть нестабильна: повторите запуск или включите VPN)" >&2; return 1; }; }
 
-key=${1:-$HOME/.ssh/3xui_kit_release}
-[[ -f $key ]] || die "Нет закрытого ключа $key. Создать: ssh-keygen -t ed25519 -C \"3X-UI KIT releases\" -f $key"
 NS="3x-ui-kit-release"
 ID="releases@3x-ui-kit"
-FILES=(scripts/3x-ui.sh scripts/hysteria2.sh scripts/kit.sh scripts/kit-sub.py VERSION)
+VERSIONED=(scripts/3x-ui.sh scripts/hysteria2.sh scripts/kit.sh)
+FILES=("${VERSIONED[@]}" scripts/kit-sub.py VERSION)
 
-v=$(tr -d '[:space:]' <VERSION)
-[[ $v =~ ^[0-9]+(\.[0-9]+)+$ ]] || die "VERSION: $v"
-for f in scripts/3x-ui.sh scripts/hysteria2.sh scripts/kit.sh; do
-  grep -qx "KIT_VERSION=\"$v\"" "$f" || die "$f: KIT_VERSION не $v"
-done
-# Точно эта версия: «## v1.2» не должна находить «## v1.2.1», а точка – не любой символ.
-grep -qE "^## v${v//./\\.}([: ]|$)" CHANGELOG.md || die "В CHANGELOG.md нет раздела ## v$v"
-ok "Версия $v во всех скриптах и в CHANGELOG"
-# Команда установки в README и в инструкции закреплена за тегом: при выпуске тег должен быть этой версии.
-for f in README.md manuals/3x-ui.md; do
-  grep -q "3X-UI_KIT/v${v}/scripts/3x-ui.sh" "$f" || die "$f: команда установки не закреплена за тегом v$v"
-done
-ok "Команда установки в README закреплена за тегом v$v"
+usage() {
+  cat <<'EOF'
+Использование:
+  tools/release.sh prepare <версия> [база]   Обновить VERSION, скрипты и CHANGELOG.md.
+  tools/release.sh notes [версия]            Вывести описание выпуска из CHANGELOG.md.
+  tools/release.sh sign [закрытый-ключ]       Проверить зависимости и подписать SHA256SUMS.
+  tools/release.sh verify                    Проверить SHA256SUMS и подпись для текущих файлов.
+  tools/release.sh tag                       Создать локальный аннотированный тег vX.Y.Z на HEAD.
 
-[[ -z $(git status --porcelain -- "${FILES[@]}" CHANGELOG.md) ]] || die "Есть незакоммиченные изменения в файлах релиза – сначала коммит."
+Версия задаётся в формате X.Y.Z (с v или без). База — тег, ветка или коммит.
+По умолчанию используется ближайший достижимый тег vX.Y.Z.
+Подпись использует ~/.ssh/3xui_kit_custom_release, если путь не задан.
+EOF
+}
 
-# Установщик 3X-UI: хеш в скрипте должен совпадать с тем, что сейчас лежит на GitHub.
-xv=$(sed -n 's/^XUI_VERSION="\(.*\)"/\1/p' scripts/3x-ui.sh)
-xs=$(sed -n 's/^XUI_INSTALL_SHA256="\(.*\)"/\1/p' scripts/3x-ui.sh)
-got=$(get "https://raw.githubusercontent.com/MHSanaei/3x-ui/$xv/install.sh" | sha | awk '{print $1}')
-[[ $got == "$xs" ]] || die "Установщик 3X-UI $xv изменился: $got вместо $xs. Проверьте, что поменялось, прежде чем выпускать."
-ok "Установщик 3X-UI $xv совпадает с закреплённым SHA256"
+valid_version() {
+  [[ $1 =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+}
 
-# Суммы архивов ядра Xray в скрипте должны совпадать с официальными (.dgst релиза Xray-core).
-xc=$(sed -n 's/^XRAY_CORE="\(.*\)"/\1/p' scripts/3x-ui.sh)
-for a in 64 arm64-v8a; do
-  pin=$(sed -n "s/^  \[$a\]=\([0-9a-f]\{64\}\)\$/\1/p" scripts/3x-ui.sh)
-  off=$(get "https://github.com/XTLS/Xray-core/releases/download/$xc/Xray-linux-$a.zip.dgst" | awk '/^SHA2-256=/ {print $2}')
-  [[ -n $pin && $pin == "$off" ]] || die "Сумма ядра Xray $xc ($a) в 3x-ui.sh не совпадает с официальной: «$pin» вместо «$off»."
-done
-ok "Суммы архивов ядра Xray $xc совпадают с официальными"
+release_notes() {
+  local version=${1#v}
+  valid_version "$version" || die "Некорректная версия: $version"
+  awk -v version="v$version" '
+    /^## / {
+      if (found) exit
+      heading = substr($0, 4)
+      if (heading != version && index(heading, version ":") != 1 &&
+          index(heading, version " ") != 1) next
+      found = 1
+      next
+    }
+    found && (printed || NF) {
+      if (NF) {
+        if (gap) printf "%s", gap
+        print
+        printed = 1
+        gap = ""
+      } else gap = gap "\n"
+    }
+    END { if (!printed) exit 1 }
+  ' CHANGELOG.md || die "Нет содержимого раздела ## $version в CHANGELOG.md."
+}
 
-# Проверенная панель и ядро в kit.sh (kit panel update, kit check): те же версии, что в установщике,
-# а суммы архива панели и скрипта меню x-ui – официальные.
-kp=$(sed -n 's/^XUI_PIN="\(.*\)"/\1/p' scripts/kit.sh)
-[[ $kp == "$xv" ]] || die "XUI_PIN в kit.sh ($kp) не совпадает с XUI_VERSION в 3x-ui.sh ($xv)."
-kx=$(sed -n 's/^XRAY_PIN="\(.*\)"/\1/p' scripts/kit.sh)
-[[ $kx == "$xc" ]] || die "XRAY_PIN в kit.sh ($kx) не совпадает с XRAY_CORE в 3x-ui.sh ($xc)."
-for a in amd64 arm64; do
-  pin=$(sed -n "s/^  \[$a\]=\([0-9a-f]\{64\}\)\$/\1/p" scripts/kit.sh)
-  off=$(get "https://github.com/MHSanaei/3x-ui/releases/download/$kp/x-ui-linux-$a.tar.gz.sha256" | awk 'NR == 1 {print $1}')
-  [[ -n $pin && $pin == "$off" ]] || die "Сумма архива панели $kp ($a) в kit.sh не совпадает с официальной: «$pin» вместо «$off»."
-done
-shs=$(sed -n 's/^XUI_SH_SHA256=\(.*\)/\1/p' scripts/kit.sh)
-got=$(get "https://raw.githubusercontent.com/MHSanaei/3x-ui/$kp/x-ui.sh" | sha | awk '{print $1}')
-[[ $shs == "$got" ]] || die "Сумма x-ui.sh $kp в kit.sh не совпадает с официальной: «$shs» вместо «$got»."
-ok "Панель $kp и ядро $kx в kit.sh совпадают с установщиком и официальными суммами"
+prepare() (
+  local target=${1#v} base=${2:-} current file temp
+  valid_version "$target" || die "Некорректная версия: $target"
+  current=$(cat VERSION)
+  valid_version "$current" || die "Некорректная версия в VERSION: $current"
+  git show-ref --verify --quiet "refs/tags/v$target" && die "Тег v$target уже существует."
+  [[ $current != "$target" && $(printf '%s\n' "$current" "$target" | sort -V | tail -1) == "$target" ]] \
+    || die "Новая версия должна быть выше $current."
+  [[ -z $(git status --porcelain -- VERSION CHANGELOG.md "${VERSIONED[@]}") ]] \
+    || die "Сначала сохрани изменения в VERSION, CHANGELOG.md и скриптах."
+  if [[ -z $base ]]; then
+    base=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' HEAD 2>/dev/null) \
+      || die "Не найден базовый тег. Укажи базовый коммит явно."
+    valid_version "${base#v}" || die "Ближайший тег $base. Укажи базовый тег или коммит явно."
+  fi
+  base=$(git rev-parse --verify --end-of-options "$base^{commit}") || die "База не найдена."
+  git merge-base --is-ancestor "$base" HEAD || die "Базовый коммит должен входить в историю HEAD."
+  for file in "${VERSIONED[@]}"; do
+    grep -qxF "KIT_VERSION=\"$current\"" "$file" || die "$file: KIT_VERSION расходится с VERSION."
+  done
+  temp=$(mktemp -d "./.release-prepare.XXXXXX")
+  trap 'rm -rf -- "$temp"' EXIT
+  if ! awk -v v="v$target" '$1 == "##" && ($2 == v || $2 == v ":") { found = 1 } END { exit !found }' CHANGELOG.md; then
+    local entries
+    entries=$(git log --no-merges --format='- %s (%h)' "$base..HEAD")
+    [[ -n $entries ]] || die "После базового коммита нет изменений для changelog."
+    {
+      head -n 1 CHANGELOG.md
+      printf '\n## v%s\n\n%s\n' "$target" "$entries"
+      tail -n +2 CHANGELOG.md
+    } > "$temp/CHANGELOG.md"
+  fi
+  printf '%s\n' "$target" > "$temp/VERSION"
+  for file in "${VERSIONED[@]}"; do
+    cp -p "$file" "$temp/${file##*/}"
+    sed "s/^KIT_VERSION=.*$/KIT_VERSION=\"$target\"/" "$file" > "$temp/${file##*/}"
+  done
+  for file in VERSION "${VERSIONED[@]}"; do
+    mv -f "$temp/${file##*/}" "$file"
+  done
+  if [[ -f $temp/CHANGELOG.md ]]; then mv -f "$temp/CHANGELOG.md" CHANGELOG.md; fi
+  ok "Версия v$target и черновик changelog готовы. Проверь git diff и закоммить изменения."
+)
 
-# В kit записан открытый ключ, которым подписываем.
-signers() { awk '/^KIT_SIGNERS=\(/ {on = 1; next} on && /^\)/ {exit} on && /^ *"/ {gsub(/^ *"|"$/, ""); print}' "$1"; }
-[[ -n $(signers scripts/kit.sh) ]] || die "В scripts/kit.sh пустой KIT_SIGNERS: впишите туда открытую часть ключа ($key.pub)."
-pub=$(ssh-keygen -y -f "$key" | awk '{print $1, $2}')
-signers scripts/kit.sh | awk '{print $1, $2}' | grep -qxF "$pub" || die "Ключа $key нет в KIT_SIGNERS – серверы не примут такую подпись."
-ok "Ключ подписи записан в kit"
+check_release_version() {
+  local file version
+  version=$(cat VERSION)
+  valid_version "$version" || die "Некорректная версия в VERSION: $version"
+  for file in "${VERSIONED[@]}"; do
+    grep -qxF "KIT_VERSION=\"$version\"" "$file" || die "$file: KIT_VERSION расходится с VERSION."
+  done
+  release_notes "$version" >/dev/null
+}
 
-{ echo "# 3X-UI KIT $v"; sha "${FILES[@]}"; } >SHA256SUMS
-rm -f SHA256SUMS.sig
-ssh-keygen -Y sign -f "$key" -n "$NS" SHA256SUMS >/dev/null
-tmp=$(mktemp)
-trap 'rm -f "$tmp"' EXIT
-signers scripts/kit.sh | while read -r k; do printf '%s namespaces="%s" %s\n' "$ID" "$NS" "$k"; done >"$tmp"
-ssh-keygen -Y verify -f "$tmp" -I "$ID" -n "$NS" -s SHA256SUMS.sig <SHA256SUMS >/dev/null || die "Подпись не прошла проверку."
-ok "SHA256SUMS подписан и проверен так же, как это сделает сервер"
-echo
-cat SHA256SUMS
-echo
-echo "Дальше:"
-echo "  git add SHA256SUMS SHA256SUMS.sig && git commit -m \"Релиз v$v: подпись\""
-echo "  git tag v$v && git push origin main v$v"
+manifest() {
+  printf '# 3X-UI KIT %s\n' "$(cat VERSION)"
+  local file digest
+  for file in "${FILES[@]}"; do
+    digest=$(sha -b "$file") || return 1
+    printf '%s  %s\n' "${digest%% *}" "$file"
+  done
+}
+
+signers() { awk '/^KIT_SIGNERS=\(/ {on = 1; next} on && /^\)/ {exit} on && /^ *"/ {gsub(/^ *"|"$/, ""); print}' scripts/kit.sh; }
+
+verify_signature() {
+  local manifest_file=$1 allowed_signers=$2 key
+  while IFS= read -r key; do
+    printf '%s namespaces="%s" %s\n' "$ID" "$NS" "$key"
+  done < <(signers) > "$allowed_signers"
+  [[ -s $allowed_signers ]] || die "В scripts/kit.sh пустой KIT_SIGNERS."
+  ssh-keygen -Y verify -f "$allowed_signers" -I "$ID" -n "$NS" -s "$manifest_file.sig" < "$manifest_file"
+}
+
+verify() (
+  check_release_version
+  local temp
+  temp=$(mktemp -d)
+  trap 'rm -rf -- "$temp"' EXIT
+  [[ -s SHA256SUMS && -s SHA256SUMS.sig ]] || die "Нет SHA256SUMS или SHA256SUMS.sig."
+  manifest > "$temp/SHA256SUMS"
+  if ! cmp -s "$temp/SHA256SUMS" SHA256SUMS; then
+    diff -u SHA256SUMS "$temp/SHA256SUMS" >&2 || true
+    die "SHA256SUMS расходится с текущими файлами релиза."
+  fi
+  verify_signature SHA256SUMS "$temp/allowed_signers" || die "Подпись не прошла проверку."
+)
+
+check_dependencies() {
+  local xv xs got xc a pin off kp kx shs
+  # Установщик 3X-UI: хеш в скрипте должен совпадать с тем, что сейчас лежит на GitHub.
+  xv=$(sed -n 's/^XUI_VERSION="\(.*\)"/\1/p' scripts/3x-ui.sh)
+  xs=$(sed -n 's/^XUI_INSTALL_SHA256="\(.*\)"/\1/p' scripts/3x-ui.sh)
+  got=$(get "https://raw.githubusercontent.com/MHSanaei/3x-ui/$xv/install.sh" | sha | awk '{print $1}')
+  [[ $got == "$xs" ]] || die "Установщик 3X-UI $xv изменился: $got вместо $xs. Проверьте, что поменялось, прежде чем выпускать."
+  ok "Установщик 3X-UI $xv совпадает с закреплённым SHA256"
+
+  # Суммы архивов ядра Xray в скрипте должны совпадать с официальными (.dgst релиза Xray-core).
+  xc=$(sed -n 's/^XRAY_CORE="\(.*\)"/\1/p' scripts/3x-ui.sh)
+  for a in 64 arm64-v8a; do
+    pin=$(sed -n "s/^  \[$a\]=\([0-9a-f]\{64\}\)\$/\1/p" scripts/3x-ui.sh)
+    off=$(get "https://github.com/XTLS/Xray-core/releases/download/$xc/Xray-linux-$a.zip.dgst" | awk '/^SHA2-256=/ {print $2}')
+    [[ -n $pin && $pin == "$off" ]] || die "Сумма ядра Xray $xc ($a) в 3x-ui.sh не совпадает с официальной: «$pin» вместо «$off»."
+  done
+  ok "Суммы архивов ядра Xray $xc совпадают с официальными"
+
+  # Проверенная панель и ядро в kit.sh (kit panel update, kit check): те же версии, что в установщике,
+  # а суммы архива панели и скрипта меню x-ui – официальные.
+  kp=$(sed -n 's/^XUI_PIN="\(.*\)"/\1/p' scripts/kit.sh)
+  [[ $kp == "$xv" ]] || die "XUI_PIN в kit.sh ($kp) не совпадает с XUI_VERSION в 3x-ui.sh ($xv)."
+  kx=$(sed -n 's/^XRAY_PIN="\(.*\)"/\1/p' scripts/kit.sh)
+  [[ $kx == "$xc" ]] || die "XRAY_PIN в kit.sh ($kx) не совпадает с XRAY_CORE в 3x-ui.sh ($xc)."
+  for a in amd64 arm64; do
+    pin=$(sed -n "s/^  \[$a\]=\([0-9a-f]\{64\}\)\$/\1/p" scripts/kit.sh)
+    off=$(get "https://github.com/MHSanaei/3x-ui/releases/download/$kp/x-ui-linux-$a.tar.gz.sha256" | awk 'NR == 1 {print $1}')
+    [[ -n $pin && $pin == "$off" ]] || die "Сумма архива панели $kp ($a) в kit.sh не совпадает с официальной: «$pin» вместо «$off»."
+  done
+  shs=$(sed -n 's/^XUI_SH_SHA256=\(.*\)/\1/p' scripts/kit.sh)
+  got=$(get "https://raw.githubusercontent.com/MHSanaei/3x-ui/$kp/x-ui.sh" | sha | awk '{print $1}')
+  [[ $shs == "$got" ]] || die "Сумма x-ui.sh $kp в kit.sh не совпадает с официальной: «$shs» вместо «$got»."
+  ok "Панель $kp и ядро $kx в kit.sh совпадают с установщиком и официальными суммами"
+}
+
+sign() (
+  check_release_version
+  [[ -z $(git status --porcelain -- "${FILES[@]}" CHANGELOG.md) ]] \
+    || die "Сначала закоммить файлы релиза и CHANGELOG.md."
+  local key=${1:-$HOME/.ssh/3xui_kit_custom_release} pub temp
+  [[ $key = /* || $key == [A-Za-z]:/* ]] || key="$caller_dir/$key"
+  [[ -f $key ]] || die "Нет закрытого ключа: $key"
+  if [[ -r $key.pub ]]; then
+    pub=$(awk 'NR == 1 { print $1, $2 }' "$key.pub")
+  else
+    pub=$(ssh-keygen -y -f "$key" | awk '{print $1, $2}')
+  fi
+  signers | awk '{print $1, $2}' | grep -xF "$pub" >/dev/null \
+    || die "Открытого ключа нет в KIT_SIGNERS."
+  check_dependencies
+  temp=$(mktemp -d "./.release-sign.XXXXXX")
+  trap 'rm -rf -- "$temp"' EXIT
+  manifest > "$temp/SHA256SUMS"
+  ssh-keygen -Y sign -f "$key" -n "$NS" "$temp/SHA256SUMS"
+  verify_signature "$temp/SHA256SUMS" "$temp/allowed_signers" || die "Подпись не прошла проверку."
+  mv -f "$temp/SHA256SUMS" "$temp/SHA256SUMS.sig" .
+  ok "Манифест подписан. Проверь и закоммить SHA256SUMS и SHA256SUMS.sig."
+)
+
+tag_release() {
+  local head version tag notes
+  head=$(git rev-parse --verify HEAD)
+  version=$(cat VERSION)
+  valid_version "$version" || die "Некорректная версия в VERSION: $version"
+  tag="v$version"
+  if git show-ref --verify --quiet "refs/tags/$tag"; then
+    die "Тег $tag уже существует."
+  fi
+  [[ -z $(git status --porcelain --untracked-files=all -- "${FILES[@]}" CHANGELOG.md SHA256SUMS SHA256SUMS.sig) ]] \
+    || die "Сначала закоммить файлы релиза, CHANGELOG.md, SHA256SUMS и SHA256SUMS.sig."
+  verify
+  notes=$(release_notes "$version")
+  git tag --annotate --file=- --cleanup=verbatim "$tag" "$head" <<<"$notes"
+  ok "Создан локальный тег $tag на $head."
+}
+
+case ${1:-sign} in
+  prepare) [[ $# -ge 2 && $# -le 3 ]] || die "Использование: prepare <версия> [база]"; prepare "${@:2}" ;;
+  notes) [[ $# -le 2 ]] || die "Использование: notes [версия]"; release_notes "${2:-$(cat VERSION)}" ;;
+  sign) [[ $# -le 2 ]] || die "Использование: sign [закрытый-ключ]"; sign "${2:-}" ;;
+  verify) [[ $# -eq 1 ]] || die "Использование: verify"; verify ;;
+  tag) [[ $# -eq 1 ]] || die "Использование: tag"; tag_release ;;
+  -h | --help) usage ;;
+  *)
+    [[ $# -eq 1 && ( -f $caller_dir/$1 || -f $1 ) ]] || die "Неизвестная команда: $1. См. --help."
+    sign "$1"
+    ;;
+esac

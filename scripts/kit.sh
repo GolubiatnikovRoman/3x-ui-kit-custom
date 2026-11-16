@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kit – управление сервером 3X-UI KIT: пользователи, обновление, резервная копия.
-# https://github.com/itsnotkubrick/3X-UI_KIT
+# https://github.com/GolubiatnikovRoman/3x-ui-kit-custom
 #
 #   kit user add имя [--gb 50] [--days 30] [--devices 3]
 #   kit user list | link имя | limit имя [--gb N] [--days N] | off имя | on имя | del имя
@@ -12,10 +12,11 @@
 set -Eeuo pipefail
 export LC_ALL=C.UTF-8  # ширина колонок по символам, а не байтам
 
-KIT_VERSION="1.2.1"
-KIT_RAW="https://raw.githubusercontent.com/itsnotkubrick/3X-UI_KIT/main"
+KIT_VERSION="1.2.2"
+KIT_REPO_RAW="https://raw.githubusercontent.com/GolubiatnikovRoman/3x-ui-kit-custom"
+KIT_RAW="$KIT_REPO_RAW/main"
 # Файлы новой версии берём из её тега, а не из меняющейся ветки main.
-kit_ref_raw() { echo "https://raw.githubusercontent.com/itsnotkubrick/3X-UI_KIT/v$1"; }
+kit_ref_raw() { echo "$KIT_REPO_RAW/v$1"; }
 
 XUI_ENV=/etc/x-ui/install-result.env
 KIT_ENV=/etc/kit/kit.env
@@ -520,14 +521,11 @@ cmd_del() {
 
 # ---------- версия и обновление ----------
 
-# Открытый ключ, которым автор подписывает релизы (ssh-keygen -Y sign). Закрытая часть
-# есть только у автора, поэтому подменить обновление, взломав один GitHub, не выйдет.
-# Обычная смена ключа идёт релизом, подписанным старым. В 1.2.1 так не вышло: прежний ключ утерян, поэтому
-# серверы на 1.2 и ниже переходят вручную (команда в README, kit.sh берётся с тега по HTTPS).
+# Открытые ключи подписи релизов форка.
 KIT_SIGNERS=(
-  # SHA256:bNjI10eGVGjdFeDJnAHvUFi73rlrXVy6vKFf8lmNyxU (itsnotkubrick, 2026-10-14; прежний ключ SHA256:VDuGgJ8d… утерян, снят)
-  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEWDFGq2Wno/ADRS2E6UKsgFbUSLvaiPIfRBvSEGJr81 3X-UI KIT releases"
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMWA14eEJky+bfn0UK4Eew8uTH8dayMcSVrlUHFIgNQV 3X-UI KIT CUSTOM releases"
 )
+KIT_UPDATES_UNAVAILABLE="Обновления KIT недоступны до первого подписанного релиза CUSTOM."
 KIT_SIG_NS="3x-ui-kit-release"
 KIT_SIG_ID="releases@3x-ui-kit"
 KIT_MANUAL=/etc/kit/manual-update
@@ -543,6 +541,7 @@ auto_enabled() { systemctl is-enabled -q kit-update.timer 2>/dev/null; }
 
 # Раз в сутки узнаём последнюю версию (не дольше 3 секунд) и подсказываем обновиться.
 update_hint() {
+  ((${#KIT_SIGNERS[@]})) || return 0
   local latest=""
   if [[ ! -f $KIT_LATEST ]] || (($(date +%s) - $(stat -c %Y "$KIT_LATEST") > 86400)); then
     latest=$(remote_version 3) || true
@@ -560,9 +559,10 @@ update_hint() {
 }
 
 cmd_version() {
-  echo "3X-UI KIT $KIT_VERSION"
+  echo "3X-UI KIT CUSTOM $KIT_VERSION"
   echo "${D}панель 3X-UI $(/usr/local/x-ui/x-ui -v 2>/dev/null | head -1 || echo '?'), ядро Xray $(xray_version)${N}"
-  if auto_enabled; then echo "${D}автообновление: включено (только подписанные релизы), журнал $KIT_UPDATE_LOG${N}"
+  if ((${#KIT_SIGNERS[@]} == 0)); then echo "$KIT_UPDATES_UNAVAILABLE"
+  elif auto_enabled; then echo "${D}автообновление: включено (только подписанные релизы), журнал $KIT_UPDATE_LOG${N}"
   else echo "${D}автообновление: выключено, включить: kit → Автообновление${N}"; fi
   update_hint
 }
@@ -681,6 +681,7 @@ needs_migration() {
 # Автообновление: раз в сутки ночью со случайной задержкой, чтобы тысячи серверов не шли
 # на GitHub в одну минуту. Ставит только подписанные релизы и только kit и kit-sub.
 auto_on() {
+  ((${#KIT_SIGNERS[@]})) || { warn "$KIT_UPDATES_UNAVAILABLE"; return 1; }
   cat >/etc/systemd/system/kit-update.service <<UNIT
 [Unit]
 Description=3X-UI KIT: автообновление kit и kit-sub (только подписанные релизы)
@@ -722,7 +723,7 @@ cmd_update() {
     case $1 in
       --force) force=yes ;;
       --panel) panel=yes ;;
-      --auto) auto_on; say "Автообновление включено: раз в сутки ночью, только подписанные релизы. Журнал: $KIT_UPDATE_LOG"; return ;;
+      --auto) auto_on || return 1; say "Автообновление включено: раз в сутки ночью, только подписанные релизы. Журнал: $KIT_UPDATE_LOG"; return ;;
       --manual) auto_off; say "Автообновление выключено. Обновлять вручную: kit → Обновить kit и подписку. Включить снова: kit → Автообновление"; return ;;
       --unattended) unattended=yes ;;
       *) die "Неизвестный параметр: $1 (kit update [--panel | --force | --auto | --manual])" ;;
@@ -730,6 +731,7 @@ cmd_update() {
     shift
   done
   [[ $panel == no ]] || { panel_update ${force:+--force}; return; }
+  ((${#KIT_SIGNERS[@]})) || die "$KIT_UPDATES_UNAVAILABLE"
   # Ночной запуск и ручной не должны встретиться.
   exec 9>/run/kit-update.lock
   flock -n 9 || die "Обновление уже идёт."
@@ -953,7 +955,8 @@ check_services() {
       c_bad svc:kit-sub "служба kit-sub не работает (journalctl -u kit-sub -n 50)"
     fi
   fi
-  if auto_enabled; then c_ok "автообновление включено"
+  if ((${#KIT_SIGNERS[@]} == 0)); then c_info "$KIT_UPDATES_UNAVAILABLE"
+  elif auto_enabled; then c_ok "автообновление включено"
   elif [[ -f $KIT_MANUAL ]]; then c_info "автообновление выключено вами (включить: kit → Автообновление)"
   else c_bad timer "автообновление не включено"; fi
   local novis
@@ -3165,6 +3168,7 @@ menu_check() {
 }
 
 menu_auto() {
+  ((${#KIT_SIGNERS[@]})) || { say "$KIT_UPDATES_UNAVAILABLE"; return 0; }
   local ans
   if auto_enabled; then
     ask_tty "Автообновление сейчас включено (ночью, только подписанные релизы). Выключить? [y/N] "
@@ -3176,18 +3180,55 @@ menu_auto() {
   return 0
 }
 
+# Настройки отображения подписок; служебные remark inbounds не изменяются.
+sub_names() {
+  local cfg=/etc/kit-sub/config.json action=${1:-show} value=${2:-} current temp
+  [[ -f $cfg ]] || die "Нет kit-sub: персонализация доступна после установки с HTTPS."
+  case $action in
+    show) jq -r '"Название: \(.display_title // "3X-UI KIT")\nИмена подключений: \(.label_mode // "default")"' "$cfg"; return ;;
+    title)
+      [[ -n $value && ${#value} -le 80 && $value != *$'\n'* && $value != *$'\r'* ]] || die "Название: 1–80 символов без перевода строки." ;;
+    mode)
+      [[ $value == default || $value == prefix ]] || die "Режим: default или prefix." ;;
+    *) die "kit sub name НАЗВАНИЕ | kit sub mode default|prefix | kit sub show" ;;
+  esac
+  temp=$(mktemp /etc/kit-sub/.config.XXXXXX)
+  chmod 600 "$temp"
+  if [[ $action == title ]]; then
+    jq --arg v "$value" '.display_title = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+    current=$(api POST setting/all '{}')
+    api POST setting/update "$(jq -c --arg v "$value" '.subTitle = $v' <<<"$current")" >/dev/null || { rm -f "$temp"; return 1; }
+    systemctl restart x-ui
+  else
+    jq --arg v "$value" '.label_mode = $v' "$cfg" >"$temp" || { rm -f "$temp"; return 1; }
+  fi
+  mv -f "$temp" "$cfg"
+  systemctl restart kit-sub
+  say "Настройки подписки сохранены."
+}
+
+menu_sub_names() {
+  sub_names show
+  ask_num "1 – название, 2 – стандартные имена, 3 – Название • inbound, 0 – назад: "
+  case $REPLY in
+    1) ask_tty "Новое название: "; sub_names title "$REPLY" ;;
+    2) sub_names mode default ;;
+    3) sub_names mode prefix ;;
+  esac
+}
+
 menu_main() {
   local c
   while :; do
     echo
     box "3X-UI KIT $KIT_VERSION – управление сервером" "1. Пользователи" "2. Протоколы, порты и маскировка" "3. Проверка сервера" "" \
       "4. Обновить kit и подписку" "5. Обновить панель 3X-UI" "6. Автообновление: включить или выключить" "" \
-      "7. Резервная копия" "8. Версии" "" "9. Панель 3X-UI (меню x-ui)" "10. Удалить KIT с сервера" "0. Выход"
+      "7. Резервная копия" "8. Версии" "" "9. Панель 3X-UI (меню x-ui)" "10. Удалить KIT с сервера" "11. Названия подписки и подключений" "0. Выход"
     echo
     menu_status
     update_hint
     echo
-    ask_num "Выбор [0-10]: "; c=$REPLY
+    ask_num "Выбор [0-11]: "; c=$REPLY
     case $c in
       1) menu_users ;;
       2) menu_net ;;
@@ -3199,6 +3240,7 @@ menu_main() {
       8) run_action cmd_version; pause ;;
       9) command -v x-ui >/dev/null && x-ui || echo "Меню x-ui не найдено." ;;
       10) run_action cmd_uninstall; pause ;;
+      11) run_action menu_sub_names; pause ;;
       0 | "") return 0 ;;
       *) echo "Нет такого пункта." ;;
     esac
@@ -3343,6 +3385,9 @@ ${B}3X-UI KIT $KIT_VERSION${N} – команды (то же самое есть
   kit user …                 add, list, link, limit, on, off, del
   kit links [имя]            все ссылки на подключения (подписка, протоколы, Telegram)
   kit net …                  протоколы, порты, сайт маскировки, отпечаток
+  kit sub name ИМЯ           название подписки
+  kit sub mode default|prefix   формат названий подключений
+  kit sub show               текущие настройки
   kit check [--deep|--fix]   проверка сервера
   kit update [--panel]       обновление (--auto и --manual – автообновление)
   kit backup                 копия сервера
@@ -3365,6 +3410,9 @@ case "$cmd_key" in
   "user del") shift 2; cmd_del "$@" ;;
   "user enforce") shift 2; cmd_enforce "$@" ;;
   "user vision") shift 2; cmd_vision "$@" ;;
+  "sub show") sub_names show ;;
+  "sub name") shift 2; sub_names title "$*" ;;
+  "sub mode") shift 2; sub_names mode "${1:-}" ;;
   "net ") shift; cmd_net; update_hint ;;
   "net "*) shift; cmd_net "$@" ;;
   "sni rotate") shift 2; sni_rotate "$@" ;;
