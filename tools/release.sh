@@ -117,7 +117,11 @@ check_release_version() {
 
 manifest() {
   printf '# 3X-UI KIT %s\n' "$(cat VERSION)"
-  sha "${FILES[@]}"
+  local file digest
+  for file in "${FILES[@]}"; do
+    digest=$(sha -b "$file") || return 1
+    printf '%s  %s\n' "${digest%% *}" "$file"
+  done
 }
 
 signers() { awk '/^KIT_SIGNERS=\(/ {on = 1; next} on && /^\)/ {exit} on && /^ *"/ {gsub(/^ *"|"$/, ""); print}' scripts/kit.sh; }
@@ -138,7 +142,10 @@ verify() (
   trap 'rm -rf -- "$temp"' EXIT
   [[ -s SHA256SUMS && -s SHA256SUMS.sig ]] || die "Нет SHA256SUMS или SHA256SUMS.sig."
   manifest > "$temp/SHA256SUMS"
-  cmp -s "$temp/SHA256SUMS" SHA256SUMS || die "SHA256SUMS расходится с текущими файлами релиза."
+  if ! cmp -s "$temp/SHA256SUMS" SHA256SUMS; then
+    diff -u SHA256SUMS "$temp/SHA256SUMS" >&2 || true
+    die "SHA256SUMS расходится с текущими файлами релиза."
+  fi
   verify_signature SHA256SUMS "$temp/allowed_signers" || die "Подпись не прошла проверку."
 )
 
