@@ -12,7 +12,7 @@
 set -Eeuo pipefail
 export LC_ALL=C.UTF-8  # ширина колонок по символам, а не байтам
 
-KIT_VERSION="1.2.1"
+KIT_VERSION="1.2.2"
 KIT_REPO_RAW="https://raw.githubusercontent.com/GolubiatnikovRoman/3x-ui-kit-custom"
 KIT_RAW="$KIT_REPO_RAW/main"
 # Файлы новой версии берём из её тега, а не из меняющейся ветки main.
