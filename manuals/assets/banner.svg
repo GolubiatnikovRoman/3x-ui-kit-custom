@@ -1,10 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="3X-UI KIT: установка сервера одной командой"><title>3X-UI KIT: установка сервера одной командой</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-label="3X-UI KIT CUSTOM: установка сервера одной командой"><title>3X-UI KIT CUSTOM: установка сервера одной командой</title>
 <defs><clipPath id="r"><rect width="1200" height="300" rx="20"/></clipPath></defs>
 <g clip-path="url(#r)"><rect width="1200" height="300" fill="#1a1411"/><path d="M60 0V300" stroke="#1d1713" stroke-width="2"/><path d="M156 0V300" stroke="#1d1713" stroke-width="2"/><path d="M252 0V300" stroke="#1d1713" stroke-width="2"/><path d="M348 0V300" stroke="#1d1713" stroke-width="2"/><path d="M444 0V300" stroke="#1d1713" stroke-width="2"/><path d="M540 0V300" stroke="#1d1713" stroke-width="2"/><path d="M636 0V300" stroke="#1d1713" stroke-width="2"/><path d="M732 0V300" stroke="#1d1713" stroke-width="2"/><path d="M828 0V300" stroke="#1d1713" stroke-width="2"/><path d="M924 0V300" stroke="#1d1713" stroke-width="2"/><path d="M1020 0V300" stroke="#1d1713" stroke-width="2"/><path d="M1116 0V300" stroke="#1d1713" stroke-width="2"/><rect y="268" width="1200" height="32" fill="#120e0c"/></g>
 <rect x="1.5" y="1.5" width="1197" height="297" rx="19" fill="none" stroke="#15110F" stroke-width="3"/>
-<g font-family="Rubik,'Arial Black','Helvetica Neue',Arial,system-ui,sans-serif" font-weight="900" font-size="66" letter-spacing="1">
-<text x="80" y="104" fill="#15110F" stroke="#15110F" stroke-width="14" stroke-linejoin="round">3X-UI KIT</text>
-<text x="80" y="104" fill="#FBF6EC" style="paint-order:stroke">3X-UI KIT</text></g>
+<g font-family="Rubik,'Arial Black','Helvetica Neue',Arial,system-ui,sans-serif" font-weight="900" font-size="52" letter-spacing="1">
+<text x="80" y="104" fill="#15110F" stroke="#15110F" stroke-width="14" stroke-linejoin="round">3X-UI KIT CUSTOM</text>
+<text x="80" y="104" fill="#FBF6EC" style="paint-order:stroke">3X-UI KIT CUSTOM</text></g>
 <g font-family="Rubik,'Arial Black','Helvetica Neue',Arial,system-ui,sans-serif" font-weight="900" font-size="35" letter-spacing="1">
 <text x="82" y="156" fill="#8A66C4" stroke="#15110F" stroke-width="10" stroke-linejoin="round" transform="translate(3 4)">УСТАНОВКА ОДНОЙ КОМАНДОЙ</text>
 <text x="82" y="156" fill="#93E06F" stroke="#15110F" stroke-width="8" stroke-linejoin="round" style="paint-order:stroke">УСТАНОВКА ОДНОЙ КОМАНДОЙ</text></g>
@@ -20,5 +20,4 @@
 <rect x="854" y="206" width="292" height="52" rx="6" fill="#F2E8D2" stroke="#15110F" stroke-width="3"/>
 <circle cx="868" cy="219" r="3.2" fill="#15110F"/><circle cx="1132" cy="219" r="3.2" fill="#15110F"/>
 <text x="1000" y="241" text-anchor="middle" font-family="Rubik,'Arial Black','Helvetica Neue',Arial,system-ui,sans-serif" font-weight="900" font-size="23" fill="#15110F" letter-spacing=".5">11 ПРОТОКОЛОВ</text></g>
-<text x="1176" y="290" text-anchor="end" font-family="Rubik,'Arial Black','Helvetica Neue',Arial,system-ui,sans-serif" font-size="13" font-weight="500" fill="#CBBFA9" font-style="italic">it's not Kubrick. it's just a VPN.</text>
 </svg>

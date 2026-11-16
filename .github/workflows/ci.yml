@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,7 +16,13 @@ jobs:
       - name: ShellCheck
         run: shellcheck -S warning -e SC1090,SC2034,SC2211 scripts/*.sh tools/release.sh
       - name: Python
-        run: python3 -m py_compile scripts/kit-sub.py
+        run: python3 -m py_compile scripts/kit-sub.py tools/test/subscription_names_test.py
+      - name: Subscription naming regression tests
+        run: python3 tools/test/subscription_names_test.py
+      - name: CUSTOM installation and update verification
+        run: python3 tools/test/custom_install_test.py
+      - name: Release preparation
+        run: bash tools/test/release_test.sh
       - name: Генераторы
         run: node --test tools/test/*.test.js
       - name: Проверка копии для --restore (GNU grep и bash)
@@ -29,9 +36,29 @@ jobs:
           grep -q "^KIT_VERSION=\"$v\"" scripts/hysteria2.sh
           grep -q "^KIT_VERSION=\"$v\"" scripts/kit.sh
       - name: Подпись релиза совпадает с файлами
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          [ -f SHA256SUMS ] || { echo "SHA256SUMS нет – релиз ещё не подписан"; exit 0; }
-          grep -qx "# 3X-UI KIT $(cat VERSION)" SHA256SUMS
-          grep -v '^#' SHA256SUMS | sha256sum -c -
-          awk '/^KIT_SIGNERS=\(/ {on = 1; next} on && /^\)/ {exit} on && /^ *"/ {gsub(/^ *"|"$/, ""); print "releases@3x-ui-kit namespaces=\"3x-ui-kit-release\" " $0}' scripts/kit.sh >allowed_signers
-          ssh-keygen -Y verify -f allowed_signers -I releases@3x-ui-kit -n 3x-ui-kit-release -s SHA256SUMS.sig <SHA256SUMS
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+          bash tools/release.sh verify
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(mktemp)
+          trap 'rm -f -- "$notes"' EXIT
+          bash tools/release.sh notes > "$notes"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "3X-UI KIT CUSTOM $GITHUB_REF_NAME" --notes-file "$notes"

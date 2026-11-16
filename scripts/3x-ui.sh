@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# 3X-UI со всеми протоколами одной командой – https://github.com/itsnotkubrick/3X-UI_KIT
-#
-# Установка:  bash <(curl -fsSL https://raw.githubusercontent.com/itsnotkubrick/3X-UI_KIT/main/scripts/3x-ui.sh)
+# 3X-UI KIT CUSTOM – https://github.com/GolubiatnikovRoman/3x-ui-kit-custom
+# Установка: bash scripts/3x-ui.sh из checkout форка.
 #
 # Ставит официальную панель 3X-UI (версия закреплена ниже) её собственным
 # установщиком, получает сертификат Let's Encrypt на IP, создаёт подключения
@@ -39,9 +38,7 @@ wait_apt_idle() {
 XUI_VERSION="v3.9.0"
 # SHA256 установщика 3X-UI этой версии: тег могут передвинуть, а хеш – нет (проверено 2026-09-30).
 XUI_INSTALL_SHA256="18616fe26c8f6c92db6daa2dcd7cd53c5143ee69ecfd26d8ea6dc9b2c78607a6"
-KIT_VERSION="1.2.1"
-# kit и kit-sub берём из того же релиза, что и этот скрипт, а не из меняющейся ветки main.
-KIT_RAW="https://raw.githubusercontent.com/itsnotkubrick/3X-UI_KIT/v$KIT_VERSION"
+KIT_VERSION="1.2.2"
 # Ядро Xray для панели. С 26.7.x клиенты на Mihomo и sing-box (Hiddify, FlClash,
 # Clash Verge, Mihomo в XKeen) не проходят REALITY – проверено 2026-09-25.
 # 26.6.27 – последняя версия, с которой работают все клиенты и которую принимает 3X-UI.
@@ -506,8 +503,8 @@ kit_banner() {
 ART
   printf '%s' "$N"
   echo
-  echo "${B}3X-UI KIT $KIT_VERSION${N}  ·  it's not Kubrick. it's just a VPN."
-  echo "${D}на основе панели 3X-UI (MHSanaei/3x-ui) и ядра Xray · github.com/itsnotkubrick/3X-UI_KIT${N}"
+  echo "${B}3X-UI KIT CUSTOM $KIT_VERSION${N}"
+  echo "${D}на основе панели 3X-UI (MHSanaei/3x-ui) и ядра Xray · github.com/GolubiatnikovRoman/3x-ui-kit-custom${N}"
 }
 
 main() {
@@ -518,6 +515,7 @@ main() {
     if [[ $a == --*=* ]]; then args+=("${a%%=*}" "${a#*=}"); else args+=("$a"); fi
   done
   set -- ${args[@]+"${args[@]}"}
+  check_kit_sources
   [[ $EUID -eq 0 ]] || die "Запустите от root: sudo -i, затем команду ещё раз."
   command -v systemctl >/dev/null || die "Нужен systemd."
   # kit-sub работает без root и получает конфиг через LoadCredential: он появился в systemd 247 (Ubuntu 22.04+, Debian 11+).
@@ -890,7 +888,7 @@ main() {
   step "Защита и обновления"
   install_kit_cli
   if [[ $TRUSTED == yes ]]; then
-    /usr/local/bin/kit __subextra >/dev/null 2>&1 || later "Адреса Clash и JSON на странице подписки не подключились: kit update --force"
+    /usr/local/bin/kit __subextra >/dev/null 2>&1 || later "Адреса Clash и JSON на странице подписки не подключились: kit check"
   fi
   # Ссылка MTProto в панели: адрес сервера и порт 443 (панель берёт их из таблицы hosts).
   [[ $SINGLE == yes ]] && { /usr/local/bin/kit __mtproto >/dev/null 2>&1 || later "Ссылка MTProto в панели осталась с внутренним портом: берите её из kit user link имя --telegram"; }
@@ -898,8 +896,8 @@ main() {
     /usr/local/bin/kit net panel domain >/dev/null 2>&1 || { PANEL_ON=ip; later "Панель и подписку по домену включить не удалось: оставил по IP. Попробуйте позже: kit net panel domain"; }
   fi
   brand_xui_menu
-  # Автообновление kit и kit-sub: только подписанные релизы, выключается kit update --manual.
-  /usr/local/bin/kit update --auto >/dev/null 2>&1 || later "Автообновление не включилось – включите позже: kit update --auto"
+  # Тестовые сборки KIT устанавливаются из закреплённого коммита.
+  /usr/local/bin/kit update --manual >/dev/null 2>&1 || die "Не удалось отключить автообновление KIT"
   # Общий лимит трафика: у пользователя несколько записей (AmneziaWG считается отдельно), раз в 5 минут их трафик складывается.
   /usr/local/bin/kit __limit-timer on >/dev/null 2>&1 || later "Проверка общего лимита трафика не включилась – включите позже: kit fix"
   /usr/local/bin/kit net dns on >/dev/null 2>&1 || later "DNS в подписке не настроился – включите позже: kit net dns on"
@@ -1007,7 +1005,7 @@ install_xui() { # порт путь логин пароль
   say "Ставлю 3X-UI $XUI_VERSION официальным установщиком (пара минут)"
   curl -fsSL --retry 3 -o "$tmp" "https://raw.githubusercontent.com/$XUI_REPO/$XUI_VERSION/install.sh"
   [[ $(sha256sum "$tmp" | awk '{print $1}') == "$XUI_INSTALL_SHA256" ]] \
-    || die "Установщик 3X-UI $XUI_VERSION не совпал с проверенным (SHA256) – не запускаю. Сообщите нам: github.com/itsnotkubrick/3X-UI_KIT/issues"
+    || die "Установщик 3X-UI $XUI_VERSION не совпал с проверенным (SHA256) – не запускаю. Сообщите нам: github.com/GolubiatnikovRoman/3x-ui-kit-custom/issues"
   spin_start "Устанавливаю панель 3X-UI"
   if ! XUI_NONINTERACTIVE=1 XUI_SSL_MODE="${PANEL_SSL/custom/none}" XUI_SERVER_IP="$HOST" \
       XUI_PANEL_PORT="$1" XUI_WEB_BASE_PATH="$2" \
@@ -1470,7 +1468,18 @@ awg_attach() { # имя subId [лимит-байт] [срок-мс] [устро�
   done
 }
 
-KIT_CLI_URL="$KIT_RAW/scripts/kit.sh"
+check_kit_sources() {
+  local source=${BASH_SOURCE[0]}
+  [[ $source != /dev/fd/* && $source != /proc/*/fd/* && $source != /dev/stdin && -f $source ]] \
+    || die "Установщик запускается из checkout 3x-ui-kit-custom (см. README)."
+  KIT_SCRIPTS_DIR=$(cd -- "$(dirname -- "$source")" && pwd -P)
+  command -v python3 >/dev/null || die "Для проверки файлов KIT установите python3."
+  [[ -s $KIT_SCRIPTS_DIR/kit.sh && -s $KIT_SCRIPTS_DIR/kit-sub.py ]] \
+    || die "Рядом с установщиком должны быть kit.sh и kit-sub.py из того же коммита."
+  bash -n "$KIT_SCRIPTS_DIR/kit.sh" \
+    && python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" "$KIT_SCRIPTS_DIR/kit-sub.py" \
+    || die "Файлы KIT не прошли проверку синтаксиса."
+}
 
 install_kit_cli() {
   install -d -m 700 /etc/kit
@@ -1489,15 +1498,10 @@ install_kit_cli() {
 }
 
 install_kit_file() {
-  local d src=""
-  d=$(dirname "${BASH_SOURCE[0]}")
-  [[ -f $d/kit.sh && ${BASH_SOURCE[0]} != /dev/fd/* ]] && src=$d/kit.sh
-  if [[ -n $src ]]; then install -m 755 "$src" /usr/local/bin/kit
-  else curl -fsSL --retry 3 -o /usr/local/bin/kit "$KIT_CLI_URL" && chmod 755 /usr/local/bin/kit; fi
-  bash -n /usr/local/bin/kit || die "Команда kit скачалась повреждённой"
+  install -m 755 "$KIT_SCRIPTS_DIR/kit.sh" /usr/local/bin/kit
 }
 
-KIT_INSTALL_CMD="bash <(curl -fsSL https://raw.githubusercontent.com/itsnotkubrick/3X-UI_KIT/main/scripts/3x-ui.sh)"
+KIT_INSTALL_CMD="см. инструкцию: https://github.com/GolubiatnikovRoman/3x-ui-kit-custom"
 
 # После «x-ui → Uninstall» меню подсказывает команду официального установщика –
 # меняем её на нашу. Только в echo: вызов установщика в «Update» не трогаем.
@@ -1786,20 +1790,25 @@ setup_subscription() {
   all=$(api POST setting/all '{}')
   SUB_PATH=$(jq -r '.subPath // "/sub/"' <<<"$all")
   if [[ $SUB_PATH == /sub/ || -z $SUB_PATH ]]; then SUB_PATH="/$(rand_str 12 | tr 'A-Z' 'a-z')/"; fi
+  local preferred_title="3X-UI KIT"
+  if [[ -f /etc/kit-sub/config.json ]]; then
+    preferred_title=$(jq -r '.display_title // "3X-UI KIT"' /etc/kit-sub/config.json 2>/dev/null || echo "3X-UI KIT")
+    [[ -n $preferred_title ]] || preferred_title="3X-UI KIT"
+  fi
   if [[ $TRUSTED == yes ]]; then
     # Наружу смотрит kit-sub (подписка с учётом приложения), 3X-UI – только на 127.0.0.1.
     SUB_PORT=2096; SUB_INTERNAL=2097
     # Без subURI панель показывает ссылку на внутренний порт 2097, до которого снаружи не достучаться.
     local uri="https://$HOST:$SUB_PORT$SUB_PATH"
     [[ $SINGLE == yes ]] && uri="https://$HOST$SUB_PATH"
-    upd=$(jq -c --arg path "$SUB_PATH" --argjson ip "$SUB_INTERNAL" --arg title "3X-UI KIT" --arg uri "$uri" '
+    upd=$(jq -c --arg path "$SUB_PATH" --argjson ip "$SUB_INTERNAL" --arg title "$preferred_title" --arg uri "$uri" '
       .subEnable = true | .subPath = $path | .subTitle = $title | .subListen = "127.0.0.1" | .subPort = $ip
       | .subURI = $uri
       | .subCertFile = "" | .subKeyFile = ""
       | .subClashEnable = true | .subClashAutoDetect = true | .subJsonEnable = true | .subJsonAutoDetect = true' <<<"$all")
   else
     SUB_PORT=$(jq -r '.subPort // 2096' <<<"$all")
-    upd=$(jq -c --arg path "$SUB_PATH" --arg title "3X-UI KIT" '
+    upd=$(jq -c --arg path "$SUB_PATH" --arg title "$preferred_title" '
       .subEnable = true | .subPath = $path | .subTitle = $title
       | .subClashEnable = true | .subClashAutoDetect = true | .subJsonEnable = true | .subJsonAutoDetect = true' <<<"$all")
   fi
@@ -1808,7 +1817,21 @@ setup_subscription() {
     systemctl restart x-ui
     wait_panel
   fi
+  # Сохраняем персонализацию при повторном запуске установщика.
+  local display_title="3X-UI KIT" label_mode=default cfg=/etc/kit-sub/config.json
+  if [[ -f $cfg ]]; then
+    display_title=$(jq -r '.display_title // "3X-UI KIT"' "$cfg" 2>/dev/null || echo "3X-UI KIT")
+    label_mode=$(jq -r '.label_mode // "default"' "$cfg" 2>/dev/null || echo default)
+  fi
+  [[ -n $display_title ]] || display_title="3X-UI KIT"
+  [[ $label_mode == prefix ]] || label_mode=default
   [[ $TRUSTED == yes ]] && install_kit_sub
+  if [[ $TRUSTED == yes && -f $cfg ]]; then
+    local tmpcfg; tmpcfg=$(mktemp)
+    jq --arg title "$display_title" --arg mode "$label_mode" '.display_title = $title | .label_mode = $mode' "$cfg" >"$tmpcfg"
+    install -m 600 "$tmpcfg" "$cfg"; rm -f "$tmpcfg"
+    systemctl restart kit-sub
+  fi
   if [[ $SINGLE == yes ]]; then SUB_URL="https://$HOST$SUB_PATH$SUBID"
   elif [[ $TRUSTED == yes ]]; then SUB_URL="https://$HOST:$SUB_PORT$SUB_PATH$SUBID"; else SUB_URL="http://127.0.0.1:$SUB_PORT$SUB_PATH$SUBID"; fi
   SUB_FETCH="$(if [[ $TRUSTED == yes ]]; then echo https; else echo http; fi)://$HOST:$SUB_PORT$SUB_PATH$SUBID"
@@ -1851,19 +1874,9 @@ WantedBy=multi-user.target
 UNIT
 }
 
-KIT_SUB_URL="$KIT_RAW/scripts/kit-sub.py"
-
-# Сам kit_sub.py: рядом со скриптом (запуск из папки scripts/) или из того же релиза.
 install_kit_sub_file() {
   install -d -m 755 /usr/local/lib/kit-sub /etc/kit-sub
-  local src=${KIT_SUB_SRC:-}
-  if [[ -z $src ]]; then
-    local d; d=$(dirname "${BASH_SOURCE[0]}")
-    [[ -f $d/kit-sub.py && ${BASH_SOURCE[0]} != /dev/fd/* ]] && src=$d/kit-sub.py
-  fi
-  if [[ -n $src ]]; then install -m 644 "$src" /usr/local/lib/kit-sub/kit_sub.py
-  else curl -fsSL --retry 3 -o /usr/local/lib/kit-sub/kit_sub.py "$KIT_SUB_URL"; fi
-  python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" /usr/local/lib/kit-sub/kit_sub.py || die "kit-sub скачался повреждённым"
+  install -m 644 "$KIT_SCRIPTS_DIR/kit-sub.py" /usr/local/lib/kit-sub/kit_sub.py
 }
 
 install_kit_sub() {
@@ -2285,7 +2298,7 @@ PY
     # MTProto: ссылка в панели – на этот сервер и 443 (чужие адреса из копии убираем), секреты – под нынешний сайт.
     /usr/local/bin/kit __mtproto restore >/dev/null 2>&1 || later "Ссылку MTProto в панели поправить не удалось: kit fix"
     brand_xui_menu
-    /usr/local/bin/kit update --auto >/dev/null 2>&1 || later "Автообновление не включилось – включите позже: kit update --auto"
+    /usr/local/bin/kit update --manual >/dev/null 2>&1 || die "Не удалось отключить автообновление KIT"
     /usr/local/bin/kit __limit-timer on >/dev/null 2>&1 || later "Проверка общего лимита трафика не включилась – включите позже: kit fix"
   fi
 
