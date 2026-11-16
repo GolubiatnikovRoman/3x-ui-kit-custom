@@ -40,3 +40,25 @@ jobs:
         run: |
           test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
           bash tools/release.sh verify
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(mktemp)
+          trap 'rm -f -- "$notes"' EXIT
+          bash tools/release.sh notes > "$notes"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "3X-UI KIT CUSTOM $GITHUB_REF_NAME" --notes-file "$notes"

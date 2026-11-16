@@ -117,4 +117,4 @@ KIT отключены.
 3. `bash tools/release.sh sign` сверит закреплённые зависимости и подпишет `SHA256SUMS` локальным ключом. Путь к ключу можно передать аргументом.
 4. `bash tools/release.sh verify` проверит подпись и суммы. Закоммить `SHA256SUMS` и `SHA256SUMS.sig`.
 5. `bash tools/release.sh tag` проверит подпись и SHA256 и создаст локальный аннотированный тег на текущем коммите. Номер тега берётся из `VERSION`, описание — из `CHANGELOG.md`.
-6. Когда коммит будет на GitHub, отправь тег командой `git push origin v1.2.3`, подставив версию выпуска. `bash tools/release.sh notes` выведет текст для GitHub Release.
+6. Когда коммит будет на GitHub, отправь тег командой `git push origin v1.2.3`, подставив версию выпуска. GitHub Actions опубликует GitHub Release с описанием из `CHANGELOG.md` после успешного CI, проверки подписи и SHA256.
