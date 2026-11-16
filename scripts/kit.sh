@@ -521,8 +521,9 @@ cmd_del() {
 
 # ---------- версия и обновление ----------
 
-# Открытые ключи подписи релизов форка. До первого подписанного релиза список пуст.
+# Открытые ключи подписи релизов форка.
 KIT_SIGNERS=(
+  "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMWA14eEJky+bfn0UK4Eew8uTH8dayMcSVrlUHFIgNQV 3X-UI KIT CUSTOM releases"
 )
 KIT_UPDATES_UNAVAILABLE="Обновления KIT недоступны до первого подписанного релиза CUSTOM."
 KIT_SIG_NS="3x-ui-kit-release"
