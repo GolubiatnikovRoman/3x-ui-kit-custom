@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Подпись релиза 3X-UI KIT. Запускает только автор, на своём компьютере, перед тегом:
 #
-#   tools/release.sh [~/.ssh/3xui_kit_release]
+#   tools/release.sh [~/.ssh/3xui_kit_custom_release]
 #
 # Проверяет, что версии сходятся и установщик 3X-UI не подменили, пишет SHA256SUMS,
 # подписывает его закрытым ключом (ssh-keygen спросит пароль ключа) и сразу проверяет
@@ -18,7 +18,7 @@ sha() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 
 # (раньше скрипт молча останавливался на случайном месте).
 get() { curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 "$1" || { echo "✗  Не скачалось с GitHub: $1 (сеть нестабильна: повторите запуск или включите VPN)" >&2; return 1; }; }
 
-key=${1:-$HOME/.ssh/3xui_kit_release}
+key=${1:-$HOME/.ssh/3xui_kit_custom_release}
 [[ -f $key ]] || die "Нет закрытого ключа $key. Создать: ssh-keygen -t ed25519 -C \"3X-UI KIT releases\" -f $key"
 NS="3x-ui-kit-release"
 ID="releases@3x-ui-kit"
@@ -32,12 +32,6 @@ done
 # Точно эта версия: «## v1.2» не должна находить «## v1.2.1», а точка – не любой символ.
 grep -qE "^## v${v//./\\.}([: ]|$)" CHANGELOG.md || die "В CHANGELOG.md нет раздела ## v$v"
 ok "Версия $v во всех скриптах и в CHANGELOG"
-# Команда установки в README и в инструкции закреплена за тегом: при выпуске тег должен быть этой версии.
-for f in README.md manuals/3x-ui.md; do
-  grep -q "3X-UI_KIT/v${v}/scripts/3x-ui.sh" "$f" || die "$f: команда установки не закреплена за тегом v$v"
-done
-ok "Команда установки в README закреплена за тегом v$v"
-
 [[ -z $(git status --porcelain -- "${FILES[@]}" CHANGELOG.md) ]] || die "Есть незакоммиченные изменения в файлах релиза – сначала коммит."
 
 # Установщик 3X-UI: хеш в скрипте должен совпадать с тем, что сейчас лежит на GitHub.

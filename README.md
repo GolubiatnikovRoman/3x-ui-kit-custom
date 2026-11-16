@@ -2,9 +2,8 @@
 
 <img alt="3X-UI KIT CUSTOM" src="manuals/assets/banner.svg" width="820">
 
-**Установка 3X-UI одной командой: 11 протоколов, один порт 443, одна подписка на всё**
+**Установка 3X-UI: 11 протоколов, один порт 443, одна подписка на всё**
 
-[![Версия](https://img.shields.io/github/v/release/itsnotkubrick/3X-UI_KIT?label=3X-UI%20KIT&color=93E06F&labelColor=221B17)](https://github.com/itsnotkubrick/3X-UI_KIT/releases/latest)
 [![Протоколов](https://img.shields.io/badge/протоколов-11-93E06F?labelColor=221B17)](manuals/3x-ui.md#протоколы)
 [![3X-UI](https://img.shields.io/badge/3X--UI-v3.9.0-93E06F?labelColor=221B17)](https://github.com/MHSanaei/3x-ui)
 [![Обновлено](https://img.shields.io/github/last-commit/GolubiatnikovRoman/3x-ui-kit-custom?label=обновлено&color=93E06F&labelColor=221B17)](https://github.com/GolubiatnikovRoman/3x-ui-kit-custom/commits)
@@ -17,17 +16,6 @@
 > **Проект – набор скриптов с открытым кодом.** Он не оказывает услуг связи и не предоставляет доступ
 > к серверам. Вы ставите его на собственный сервер и сами отвечаете за соблюдение законодательства
 > своей страны. Проект создан в образовательных целях.
-
-> [!TIP]
-> **Вышла версия 1.2.1:** выбор протоколов при установке, полное удаление, меню вместо команд и исправления установки.
-> [Что нового](https://github.com/itsnotkubrick/3X-UI_KIT/releases/tag/v1.2.1)
->
-> **Сменился ключ подписи релизов, поэтому сервер на версии 1.2 и ниже сам не обновится.** Один раз выполните на
-> сервере эту команду, и дальше автообновление снова заработает:
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/itsnotkubrick/3X-UI_KIT/v1.2.1/scripts/kit.sh -o /usr/local/bin/kit && chmod 755 /usr/local/bin/kit && kit update
-> ```
-> Новая установка ничего не требует.
 
 **3X-UI KIT** превращает чистый VPS в готовый VPN-сервер за несколько минут. Скрипт ставит
 официальную панель [3X-UI](https://github.com/MHSanaei/3x-ui), настраивает все популярные
@@ -55,7 +43,7 @@
   срок и число устройств. Меню `kit` работает как у x-ui: выбрали цифру – готово.
 - 💾 **Резервная копия и переезд на новый сервер одной командой.** Копия сохраняет подключения, ключи
   и пользователей, а на чистом VPS (даже с другим IP) сервер поднимается из неё за несколько минут.
-- 🔄 **Обновляется само, но только подписанными релизами.**
+- 🔄 **Обновления KIT появятся после первого подписанного релиза CUSTOM.**
 - 🩺 **Проверка и починка сервера** из меню `kit`.
 - 🧹 **Полное удаление.** Пункт «Удалить KIT с сервера» убирает панель, подписку, настройки и сертификаты, а ваш SSH и чужие сертификаты не трогает.
 
@@ -69,13 +57,21 @@
 
 ## Установка
 
-Подключитесь к серверу по SSH и выполните одну команду на чистом VPS.
-
-Панель 3X-UI, все протоколы на порту 443 и одна подписка на всё:
+Подключитесь к чистому тестовому VPS по SSH. Для установки нужны `git` и `python3`
+(`sudo apt-get install git python3`). Укажите полный SHA опубликованного коммита CUSTOM
+с поддержкой установки из checkout:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/itsnotkubrick/3X-UI_KIT/v1.2.1/scripts/3x-ui.sh)
+kit_commit="ПОЛНЫЙ_SHA_КОММИТА_CUSTOM"
+git clone https://github.com/GolubiatnikovRoman/3x-ui-kit-custom.git &&
+  cd 3x-ui-kit-custom &&
+  git checkout --detach "$kit_commit" &&
+  sudo bash scripts/3x-ui.sh
 ```
+
+Замените `ПОЛНЫЙ_SHA_КОММИТА_CUSTOM` на SHA нужного коммита. Установщик берёт
+`kit.sh` и `kit-sub.py` из этого checkout. До первого подписанного релиза обновления
+KIT отключены.
 
 Через пару минут скрипт покажет адрес панели, логин, пароль и подписку с QR-кодом.
 Подробно – подключение приложений, дополнительные пользователи и параметры – в **[инструкции](manuals/3x-ui.md)**.
